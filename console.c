@@ -192,6 +192,8 @@ void
 consoleintr(int (*getc)(void))
 {
   int c, doprocdump = 0;
+  int i, pos;
+  char flushcode[10]="\033[2J\033[1;1H";
 
   acquire(&cons.lock);
   while((c = getc()) >= 0){
@@ -211,6 +213,35 @@ consoleintr(int (*getc)(void))
       if(input.e != input.w){
         input.e--;
         consputc(BACKSPACE);
+      }
+      break;
+	case C('L'):
+      // Clear the ubuntu terminal (uart protocol)
+      for(i = 0; i < 10; i++){
+        c = (int)flushcode[i];
+        uartputc(c);
+      }
+      // Clear the qemu screen (24x80) (graphic mode)
+      for(i = 0; i <= 24; i++){
+        cgaputc('\n');
+      }
+      pos = 0;
+      outb(CRTPORT, 14);
+      outb(CRTPORT+1, pos>>8);
+      outb(CRTPORT, 15);
+      outb(CRTPORT+1, pos);
+
+      // Rewrite the last command
+      input.buf[input.e % INPUT_BUF] = 0;
+      while(input.e != input.w &&
+            input.buf[(input.e-1) % INPUT_BUF] != '\n'){
+        input.e--;
+      }
+      consputc('$');
+      consputc(' ');
+      while((c = input.buf[input.e % INPUT_BUF]) != 0) {
+        consputc(c);
+        input.e++;
       }
       break;
     default:
