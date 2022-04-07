@@ -10,6 +10,7 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  struct proc *free;
 } ptable;
 
 static struct proc *initproc;
@@ -23,7 +24,12 @@ static void wakeup1(void *chan);
 void
 pinit(void)
 {
+  struct proc *p;
+
   initlock(&ptable.lock, "ptable");
+  for(p = ptable.proc; p < &ptable.proc[NPROC-1]; p++)
+    p->sibling = p+1;
+  ptable.free = ptable.proc;
 }
 
 // Must be called with interrupts disabled
@@ -78,9 +84,11 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == UNUSED)
-      goto found;
+  if((p = ptable.free) != 0){
+    ptable.free = p->sibling;
+    p->sibling = 0;
+    goto found;
+  }
 
   release(&ptable.lock);
   return 0;
@@ -93,6 +101,8 @@ found:
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
+    p->sibling = ptable.free;
+    ptable.free = p;
     p->state = UNUSED;
     return 0;
   }
@@ -193,11 +203,22 @@ fork(void)
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
+    np->sibling = ptable.free;
+    ptable.free = np;
     np->state = UNUSED;
     return -1;
   }
   np->sz = curproc->sz;
+  np->ochild = 0;
+  np->ychild = 0;
   np->parent = curproc;
+  if(curproc->ochild == 0){
+    curproc->ochild = np; 
+    curproc->ychild = np; 
+  } else {
+    curproc->ychild->sibling = np;
+    curproc->ychild = np;
+  }
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -267,41 +288,60 @@ exit(void)
   panic("zombie exit");
 }
 
+void
+freeproc(struct proc *p)
+{
+  kfree(p->kstack);
+  p->kstack = 0;
+  freevm(p->pgdir);
+  p->pid = 0;
+  p->parent = 0;
+  p->name[0] = 0;
+  p->killed = 0;
+  p->sibling = ptable.free;
+  ptable.free = p;
+  p->state = UNUSED;
+}
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
 wait(void)
 {
-  struct proc *p;
-  int havekids, pid;
+  struct proc *p, *prev;
+  int pid;
   struct proc *curproc = myproc();
   
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
-    havekids = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc)
-        continue;
-      havekids = 1;
+    p = curproc->ochild;
+    if(p){
       if(p->state == ZOMBIE){
-        // Found one.
         pid = p->pid;
-        kfree(p->kstack);
-        p->kstack = 0;
-        freevm(p->pgdir);
-        p->pid = 0;
-        p->parent = 0;
-        p->name[0] = 0;
-        p->killed = 0;
-        p->state = UNUSED;
+        curproc->ochild = p->sibling;
+        if(curproc->ochild == 0)
+          curproc->ychild = 0;
+        freeproc(p);
         release(&ptable.lock);
         return pid;
+      }
+      prev = p;
+      for(p = p->sibling; p != 0; p = p->sibling){
+        if(p->state == ZOMBIE){
+          pid = p->pid;
+          prev->sibling = p->sibling; 
+          if(prev->sibling == 0)
+            curproc->ychild = prev;
+          freeproc(p);
+          release(&ptable.lock);
+          return pid;
+        }
+        prev = p;
       }
     }
 
     // No point waiting if we don't have any children.
-    if(!havekids || curproc->killed){
+    if(curproc->ochild == 0 || curproc->killed){
       release(&ptable.lock);
       return -1;
     }
