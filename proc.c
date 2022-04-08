@@ -274,8 +274,15 @@ exit(void)
   wakeup1(curproc->parent);
 
   // Pass abandoned children to init.
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->parent == curproc){
+  if(curproc->ochild) {
+    if(initproc->ochild == 0) {
+      initproc->ochild = curproc->ochild;
+      initproc->ychild = curproc->ychild;
+    } else {
+      initproc->ychild->sibling = curproc->ochild;
+      initproc->ychild = curproc->ychild;
+    }
+    for(p = curproc->ochild; p != 0; p = p->sibling) {
       p->parent = initproc;
       if(p->state == ZOMBIE)
         wakeup1(initproc);
