@@ -6,11 +6,15 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "scheduler.h"
 
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-  struct proc *free;
+  struct mlfq mlfq;
+  struct stride stride;
+  struct queue sleep;
+  struct queue free;
 } ptable;
 
 static struct proc *initproc;
@@ -21,6 +25,78 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
+// MLFQ
+static void
+pushqueue(int level, struct proc *p){
+  struct queue *queue;
+
+  switch(level) {
+    case FREEQ:
+      queue = &ptable.free;
+      break;
+    case SLEEPQ:
+      queue = &ptable.sleep;
+      break;
+    default:
+      queue = &ptable.mlfq.queue[level];
+  }
+  if(queue->head == 0){
+    queue->head = p;
+    queue->tail = p;
+    if(level >= 0) ptable.mlfq.pin[level] = p;
+  } else {
+    queue->tail->next = p;
+    p->prev = queue->tail;
+    queue->tail = p;
+  }
+}
+
+static void
+concatqueue(int src, int dst){
+  struct queue *srcq = &ptable.mlfq.queue[src];
+  struct queue *dstq = &ptable.mlfq.queue[dst];
+
+  if(srcq->head != 0){
+    if(dstq->head == 0){
+      dstq->head = srcq->head;
+      ptable.mlfq.pin[dst] = srcq->head;
+    } else {
+      dstq->tail->next = srcq->head;
+      srcq->head->prev = dstq->tail;
+    }
+    dstq->tail = srcq->tail;
+    srcq->head = srcq->tail = 0;
+    ptable.mlfq.pin[src] = 0;
+  }
+}
+
+static void
+popqueue(struct proc *p){
+  struct queue *queue;
+  struct proc **ppin;
+
+  switch(p->state){
+    case UNUSED:
+      queue = &ptable.free;
+      break;
+    case SLEEPING:
+      queue = &ptable.sleep;
+      break;
+    default:
+      queue = &ptable.mlfq.queue[p->privlevel];
+      ppin = &ptable.mlfq.pin[p->privlevel];
+      if(*ppin == p)
+        *ppin = p->next ? p->next : p != queue->head ? queue->head : 0;
+  }
+
+  if(p->prev) p->prev->next = p->next;
+  if(p->next) p->next->prev = p->prev;
+  if(p == queue->head) queue->head = p->next;
+  if(p == queue->tail) queue->tail = p->prev;
+  p->prev = 0;
+  p->next = 0;
+}
+
 void
 pinit(void)
 {
@@ -28,8 +104,8 @@ pinit(void)
 
   initlock(&ptable.lock, "ptable");
   for(p = ptable.proc; p < &ptable.proc[NPROC-1]; p++)
-    p->sibling = p+1;
-  ptable.free = ptable.proc;
+    pushqueue(FREEQ, p);
+  ptable.mlfq.tickets = 100;
 }
 
 // Must be called with interrupts disabled
@@ -71,6 +147,44 @@ myproc(void) {
   return p;
 }
 
+void
+inctick(void) {
+  struct proc *p = myproc();
+  if(p->state == RUNNING)
+    p->ticks++;
+}
+
+/*
+// Stride
+static void
+pushheap(struct proc *p){
+  int i = ++ptable.stride.size;
+  struct proc **minheap = ptable.stride.minheap;
+
+  while(i != 1 && p->pass < minheap[i/2]->pass){
+    minheap[i] = minheap[i/2];
+    i /= 2;
+  }
+  minheap[i] = p;
+}
+
+static struct proc*
+popheap(){
+  int parent, child;
+  struct proc **minheap = ptable.stride.minheap;
+  struct proc *min = minheap[1];
+  struct proc *last = minheap[ptable.stride.size--];
+
+  for(parent=1, child=2; child <= ptable.stride.size; parent=child, child*=2){
+    if(child < ptable.stride.size && minheap[child]->pass > minheap[child+1]->pass) child++;
+    if(last->pass <= minheap[child]->pass) break;
+    minheap[parent] = minheap[child];
+  }
+  minheap[parent] = last;
+
+  return min;
+}
+*/
 //PAGEBREAK: 32
 // Look in the process table for an UNUSED proc.
 // If found, change state to EMBRYO and initialize
@@ -84,9 +198,8 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
-  if((p = ptable.free) != 0){
-    ptable.free = p->sibling;
-    p->sibling = 0;
+  if((p = ptable.free.head) != 0){
+    popqueue(p);
     goto found;
   }
 
@@ -101,9 +214,8 @@ found:
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
-    p->sibling = ptable.free;
-    ptable.free = p;
     p->state = UNUSED;
+    pushqueue(FREEQ, p);
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
@@ -159,6 +271,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  pushqueue(p->privlevel, p);
 
   release(&ptable.lock);
 }
@@ -203,9 +316,8 @@ fork(void)
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
-    np->sibling = ptable.free;
-    ptable.free = np;
     np->state = UNUSED;
+    pushqueue(FREEQ, np);
     return -1;
   }
   np->sz = curproc->sz;
@@ -231,11 +343,14 @@ fork(void)
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
+  np->type = MLFQ;
+
   pid = np->pid;
 
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  pushqueue(np->privlevel, np);
 
   release(&ptable.lock);
 
@@ -290,6 +405,7 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
+  if(curproc->type == MLFQ) popqueue(curproc);
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
@@ -303,11 +419,19 @@ freeproc(struct proc *p)
   freevm(p->pgdir);
   p->pid = 0;
   p->parent = 0;
+  p->sibling = 0;
+  p->ochild = 0;
+  p->ychild = 0;
   p->name[0] = 0;
   p->killed = 0;
-  p->sibling = ptable.free;
-  ptable.free = p;
+  p->tickets = 0;
+  p->pass = 0;
+  p->ticks = 0;
+  p->privlevel = 0;
+  p->prev = 0;
+  p->next = 0;
   p->state = UNUSED;
+  pushqueue(FREEQ, p);
 }
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
@@ -337,7 +461,7 @@ wait(void)
         if(p->state == ZOMBIE){
           pid = p->pid;
           prev->sibling = p->sibling; 
-          if(prev->sibling == 0)
+          if(p->sibling == 0)
             curproc->ychild = prev;
           freeproc(p);
           release(&ptable.lock);
@@ -358,6 +482,91 @@ wait(void)
   }
 }
 
+struct proc*
+mlfqselect(int curlevel){
+  struct proc *p;
+  struct proc **ppin = &ptable.mlfq.pin[curlevel];
+  int l, baselevel = NELEM(ptable.mlfq.queue)-1;
+
+  for(l = 0; l < curlevel; l++){
+    for(p = ptable.mlfq.queue[l].head; p != 0; p = p->next){
+      if(p->state == RUNNABLE)
+        return p;
+    }
+  }
+  for(p = *ppin; p != 0; p = p->next){
+    if(p->state == RUNNABLE)
+      return p;
+  }
+  for(p = ptable.mlfq.queue[l].head; p != *ppin; p = p->next){
+    if(p->state == RUNNABLE)
+      return p;
+  }
+  for(l = curlevel+1; l <= baselevel; l++){
+    for(p = ptable.mlfq.queue[l].head; p != 0; p = p->next){
+      if(p->state == RUNNABLE)
+        return p;
+    }
+  }
+
+  return 0;
+}
+
+void
+mlfqlogic(struct proc* p){
+  struct proc** ppin = &ptable.mlfq.pin[p->privlevel];
+  struct proc* itr;
+  int l, baselevel = NELEM(ptable.mlfq.queue)-1;
+
+  ptable.mlfq.ticks++;
+  switch(p->state){
+    case RUNNABLE:
+      p->ticks++;
+      if(p->privlevel < baselevel && p->ticks % TA(p->privlevel) == 0){
+        popqueue(p);
+        p->privlevel++;
+        pushqueue(p->privlevel, p);
+        p->ticks = 0;
+      } else if(p->ticks % TQ(p->privlevel) == 0){
+        *ppin = p->next ? p->next : ptable.mlfq.queue[p->privlevel].head;
+      }
+      break;
+    case SLEEPING:
+      if(p->privlevel < baselevel && p->ticks % TA(p->privlevel) == 0){
+        p->privlevel++;
+        p->ticks = 0;
+      }
+      break;
+    case ZOMBIE:
+      break;
+    default:
+      panic("mlfq wrong state");
+  }
+  // Priority boost
+  if(ptable.mlfq.ticks % BOOSTPERIOD == 0){
+    if(ptable.mlfq.pin[0] == 0){
+      for(l = 1; l <= baselevel; l++){
+        itr = ptable.mlfq.queue[l].head;
+        if(itr){
+          ptable.mlfq.pin[0] = itr;
+          break;
+        }
+      }
+    }
+    for(l = 1; l <= baselevel; l++){
+      for(itr = ptable.mlfq.queue[l].head; itr != 0; itr = itr->next){
+        itr->privlevel = 0;
+        itr->ticks = 0;
+      }
+      concatqueue(l, 0);
+      for(itr = ptable.sleep.head; itr != 0; itr = itr->next){
+        itr->privlevel = 0;
+        itr->ticks = 0;
+      }
+    }
+  }
+}
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -371,21 +580,20 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int curlevel = 0;
   c->proc = 0;
   
+  // Enable interrupts on this processor.
+  sti();
+
   for(;;){
-    // Enable interrupts on this processor.
-    sti();
-
-    // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    if((p = mlfqselect(curlevel)) != 0){
+      curlevel = p->privlevel;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+    // Switch to chosen process.  It is the process's job
+    // to release ptable.lock and then reacquire it
+    // before jumping back to us.
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -395,10 +603,10 @@ scheduler(void)
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
+      mlfqlogic(p);
       c->proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
 
@@ -484,7 +692,9 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
+  if(p->type == MLFQ) popqueue(p);
   p->state = SLEEPING;
+  pushqueue(SLEEPQ, p);
 
   sched();
 
@@ -506,9 +716,13 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.sleep.head; p != 0; p = p->next){
+    if(p->chan == chan){
+      popqueue(p);
       p->state = RUNNABLE;
+      pushqueue(p->privlevel, p);
+    }
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -533,8 +747,11 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING){
+        popqueue(p);
         p->state = RUNNABLE;
+        pushqueue(p->privlevel, p);
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -570,7 +787,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
+    cprintf("%d %d %s %s", p->pid, p->privlevel, state, p->name);
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)
