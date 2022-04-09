@@ -176,9 +176,8 @@ popqueue(int level, struct proc *p){
 
 void
 inctick(void) {
-  struct proc *p = myproc();
   acquire(&ptable.lock);
-  p->ticks++;
+  myproc()->ticks++;
   release(&ptable.lock);
 }
 // End of scheduling helper part
