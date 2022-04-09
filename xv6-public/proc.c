@@ -188,7 +188,7 @@ pinit(void)
   struct proc *p;
 
   initlock(&ptable.lock, "ptable");
-  for(p = ptable.proc; p < &ptable.proc[NPROC-1]; p++)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     pushqueue(FREEQ, p);
   ptable.mlfq.tickets = 100;
 }
