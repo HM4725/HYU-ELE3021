@@ -4,10 +4,10 @@
 int
 main(void)
 {
-  int n = 3;
+  int n = 300;
   while(n > 0){
-    printf(1, "[test]: %d\n", n);
     yield();
+    printf(1, "my privlevel: %d\n", getlev());
     n = n - 1;
   }
   exit();

@@ -85,6 +85,13 @@ sys_yield(void)
   return 0;
 }
 
+int
+sys_getlev(void)
+{
+  struct proc *p = myproc();
+  return p->type == MLFQ ? p->privlevel : -1;
+}
+
 // return how many clock tick interrupts have occurred
 // since start.
 int
