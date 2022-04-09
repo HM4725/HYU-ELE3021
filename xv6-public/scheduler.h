@@ -5,7 +5,7 @@
 #define TQ(l) (l==0 ? 1 : l==1 ? 2 : 4)
 #define TA(l) (l==0 ? 5 : 10)
 #define LARGENUM 10000
-#define MINSHARE 20
+#define RESERVE 20
 #define MAXUINT 0xffffffff
 #define STRD(t) (LARGENUM / (t))
 

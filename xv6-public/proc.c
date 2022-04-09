@@ -35,11 +35,14 @@ int set_cpu_share(int share){
   int remain;
   uint minpass, mlfqpass;
 
+  if(share < 1 || share > 100 - RESERVE)
+    return -1;
+
   acquire(&ptable.lock);
   remain = ptable.mlfq.tickets;
   if(p->type == STRIDE)
     remain += p->tickets;
-  if(remain - share >= MINSHARE){
+  if(remain - share >= RESERVE){
     if(p->type == MLFQ){
       popqueue(p);
       minpass = getminpass();
