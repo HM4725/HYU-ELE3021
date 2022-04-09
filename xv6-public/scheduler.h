@@ -2,11 +2,13 @@
 #define BOOSTPERIOD 100
 #define SLEEPQ -1
 #define FREEQ -2
+#define STRIDEQ -3
 #define TQ(l) (l==0 ? 1 : l==1 ? 2 : 4)
 #define TA(l) (l==0 ? 5 : 10)
-#define LARGENUM 10000
+#define LARGENUM 1000
 #define RESERVE 20
-#define MAXUINT 0xffffffff
+#define MAXINT 0x7fffffff
+#define THRESHOLD 0x6fffffff
 #define STRD(t) (LARGENUM / (t))
 
 struct queue {
@@ -16,15 +18,16 @@ struct queue {
 
 struct mlfq {
   // Stride part
-  uint tickets;
-  uint pass;
+  int tickets;
+  int pass;
   // MLFQ part
   uint ticks;
-  struct queue queue[QSIZE]; // RUN queue
+  struct queue queue[QSIZE]; // RUNNING & RUNNABLE
   struct proc* pin[QSIZE];  
 };
 
 struct stride {
-  uint size;
-  struct proc* minheap[NPROC+1]; // RUNNABLE heap
+  int size;
+  struct proc* minheap[NPROC+1]; // RUNNABLE & SLEEP
+  struct queue run;
 };

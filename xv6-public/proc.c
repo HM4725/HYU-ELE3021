@@ -26,29 +26,32 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 static void pushheap(struct proc*);
-static void popqueue(struct proc*);
-static uint getminpass(void);
+static void pushqueue(int, struct proc*);
+static void popqueue(int, struct proc*);
+static int getminpass(void);
 
 // Stride scheduler helper functions
 int set_cpu_share(int share){
-  struct proc *p = myproc();
+  struct proc *p;
   int remain;
-  uint minpass, mlfqpass;
+  int minpass, mlfqpass;
 
   if(share < 1 || share > 100 - RESERVE)
     return -1;
 
   acquire(&ptable.lock);
+  p = myproc();
   remain = ptable.mlfq.tickets;
   if(p->type == STRIDE)
     remain += p->tickets;
   if(remain - share >= RESERVE){
     if(p->type == MLFQ){
-      popqueue(p);
+      popqueue(p->privlevel, p);
       minpass = getminpass();
       mlfqpass = ptable.mlfq.pass;
       p->pass = minpass < mlfqpass ? minpass : mlfqpass;
       p->type = STRIDE;
+      pushqueue(STRIDEQ, p);
     }
     ptable.mlfq.tickets = remain - share;
     p->tickets = share;
@@ -60,10 +63,10 @@ int set_cpu_share(int share){
   }
 }
 
-static uint
+static int
 getminpass(void){
   return ptable.stride.size > 0 ?
-    ptable.stride.minheap[1]->pass : MAXUINT;
+    ptable.stride.minheap[1]->pass : MAXINT;
 }
 
 static void
@@ -94,12 +97,15 @@ popheap(){
 
   return min;
 }
-// MLFQ scheduler helper functions
+
 static void
 pushqueue(int level, struct proc *p){
   struct queue *queue;
 
   switch(level) {
+    case STRIDEQ:
+      queue = &ptable.stride.run;
+      break;
     case FREEQ:
       queue = &ptable.free;
       break;
@@ -140,15 +146,18 @@ concatqueue(int src, int dst){
 }
 
 static void
-popqueue(struct proc *p){
+popqueue(int level, struct proc *p){
   struct queue *queue;
   struct proc **ppin;
 
-  switch(p->state){
-    case UNUSED:
+  switch(level){
+    case STRIDEQ:
+      queue = &ptable.stride.run;
+      break;
+    case FREEQ:
       queue = &ptable.free;
       break;
-    case SLEEPING:
+    case SLEEPQ:
       queue = &ptable.sleep;
       break;
     default:
@@ -157,7 +166,6 @@ popqueue(struct proc *p){
       if(*ppin == p)
         *ppin = p->next ? p->next : p != queue->head ? queue->head : 0;
   }
-
   if(p->prev) p->prev->next = p->next;
   if(p->next) p->next->prev = p->prev;
   if(p == queue->head) queue->head = p->next;
@@ -169,8 +177,9 @@ popqueue(struct proc *p){
 void
 inctick(void) {
   struct proc *p = myproc();
-  if(p->state == RUNNING)
-    p->ticks++;
+  acquire(&ptable.lock);
+  p->ticks++;
+  release(&ptable.lock);
 }
 // End of scheduling helper part
 
@@ -238,7 +247,7 @@ allocproc(void)
   acquire(&ptable.lock);
 
   if((p = ptable.free.head) != 0){
-    popqueue(p);
+    popqueue(FREEQ, p);
     goto found;
   }
 
@@ -445,9 +454,10 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   if(curproc->type == MLFQ){
-    popqueue(curproc);
-  } else { // stride
+    popqueue(curproc->privlevel, curproc);
+  } else { // STRIDE
     ptable.mlfq.tickets += curproc->tickets;
+    popqueue(STRIDEQ, curproc);
   }
   curproc->state = ZOMBIE;
   sched();
@@ -566,7 +576,7 @@ mlfqlogic(struct proc* p){
     case RUNNABLE:
       p->ticks++;
       if(p->privlevel < baselevel && p->ticks % TA(p->privlevel) == 0){
-        popqueue(p);
+        popqueue(p->privlevel, p);
         p->privlevel++;
         pushqueue(p->privlevel, p);
         p->ticks = 0;
@@ -624,30 +634,25 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   int curlevel = 0;
-  uint minpass, mlfqpass;
-  int type;
+  int mlfqpass;
+  int i;
+
   c->proc = 0;
-  
-  // Enable interrupts on this processor.
   sti();
 
   for(;;){
     acquire(&ptable.lock);
-    minpass = getminpass();
+
+    // Select next process
     mlfqpass = ptable.mlfq.pass;
-    if(minpass < mlfqpass){
-      p = popheap();
-      type = STRIDE;
-    } else {
-      p = mlfqselect(curlevel);
-      type = MLFQ;
-    }
-    if(p) {
-      if(p->type == MLFQ)
-        curlevel = p->privlevel;
-    // Switch to chosen process.  It is the process's job
-    // to release ptable.lock and then reacquire it
-    // before jumping back to us.
+    p = getminpass() < mlfqpass ?
+      popheap() : mlfqselect(curlevel);
+
+    // Run process
+    if(p != 0 && p->state == RUNNABLE) {
+      if(p->type == STRIDE)
+        pushqueue(STRIDEQ, p);
+
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -655,19 +660,32 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
       if(p->type == MLFQ){
+        curlevel = p->privlevel;
         mlfqlogic(p);
-      } else { // STRIDE
-        p->pass += STRD(p->tickets);
-        if(p->state == RUNNABLE)
-          pushheap(p);
       }
       c->proc = 0;
     }
-    if(type == MLFQ)
+
+    // Stride logging
+    if(p == 0 || p->type == MLFQ){
+      if(mlfqpass > THRESHOLD){
+        for(i = 1; i <= ptable.stride.size; i++){
+          ptable.stride.minheap[i]->pass -= mlfqpass;
+        }
+        for(p = ptable.stride.run.head; p != 0; p = p->next){
+          p->pass -= mlfqpass;
+        }
+        ptable.mlfq.pass = 0;
+      }
       ptable.mlfq.pass += STRD(ptable.mlfq.tickets);
+    } else if(p->type == STRIDE){
+      if(p->state == RUNNABLE || p->state == SLEEPING){
+        p->pass += STRD(p->tickets);
+        pushheap(p);
+      }
+    }
+
     release(&ptable.lock);
   }
 }
@@ -702,8 +720,13 @@ sched(void)
 void
 yield(void)
 {
+  struct proc *p;
+
   acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
+  p = myproc();
+  if(p->type == STRIDE)
+    popqueue(STRIDEQ, p);
+  p->state = RUNNABLE;
   sched();
   release(&ptable.lock);
 }
@@ -754,7 +777,11 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
-  if(p->type == MLFQ) popqueue(p);
+  if(p->type == MLFQ){
+    popqueue(p->privlevel, p);
+  } else {
+    popqueue(STRIDEQ, p);
+  }
   p->state = SLEEPING;
   pushqueue(SLEEPQ, p);
 
@@ -780,13 +807,10 @@ wakeup1(void *chan)
 
   for(p = ptable.sleep.head; p != 0; p = p->next){
     if(p->chan == chan){
-      popqueue(p);
+      popqueue(SLEEPQ, p);
       p->state = RUNNABLE;
-      if(p->type == MLFQ){
+      if(p->type == MLFQ)
         pushqueue(p->privlevel, p);
-      } else {
-        pushheap(p);
-      }
     }
   }
 }
@@ -814,7 +838,7 @@ kill(int pid)
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING){
-        popqueue(p);
+        popqueue(SLEEPQ, p);
         p->state = RUNNABLE;
         pushqueue(p->privlevel, p);
       }

@@ -56,8 +56,8 @@ struct proc {
   char name[16];               // Process name (debugging)
   enum schedtype type;
   // Stride part
-  uint tickets;
-  uint pass;
+  int tickets;
+  int pass;
   // MLFQ part
   uint ticks;
   int privlevel;
