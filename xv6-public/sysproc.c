@@ -92,6 +92,16 @@ sys_getlev(void)
   return p->type == MLFQ ? p->privlevel : -1;
 }
 
+int
+sys_set_cpu_share(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return set_cpu_share(n);
+}
+
 // return how many clock tick interrupts have occurred
 // since start.
 int

@@ -2,8 +2,12 @@
 #define BOOSTPERIOD 100
 #define SLEEPQ -1
 #define FREEQ -2
-#define TQ(x) (x==0 ? 1 : x==1 ? 2 : 4)
-#define TA(x) (x==0 ? 5 : 10)
+#define TQ(l) (l==0 ? 1 : l==1 ? 2 : 4)
+#define TA(l) (l==0 ? 5 : 10)
+#define LARGENUM 10000
+#define MINSHARE 20
+#define MAXUINT 0xffffffff
+#define STRD(t) (LARGENUM / (t))
 
 struct queue {
   struct proc *head;
