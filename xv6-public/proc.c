@@ -641,9 +641,10 @@ scheduler(void)
   int i;
 
   c->proc = 0;
-  sti();
 
   for(;;){
+    sti();
+
     acquire(&ptable.lock);
 
     // Select next process
