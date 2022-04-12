@@ -537,27 +537,31 @@ wait(void)
 struct proc*
 mlfqselect(int curlevel){
   struct proc *p;
-  struct proc **ppin = &ptable.mlfq.pin[curlevel];
+  struct proc **ppin;
   int l, baselevel = NELEM(ptable.mlfq.queue)-1;
 
   for(l = 0; l < curlevel; l++){
+    ppin = &ptable.mlfq.pin[l];
     for(p = ptable.mlfq.queue[l].head; p != 0; p = p->next){
-      if(p->state == RUNNABLE)
+      if(p->state == RUNNABLE){
+        *ppin = p;
         return p;
+      }
     }
   }
-  for(p = *ppin; p != 0; p = p->next){
-    if(p->state == RUNNABLE)
-      return p;
-  }
-  for(p = ptable.mlfq.queue[l].head; p != *ppin; p = p->next){
-    if(p->state == RUNNABLE)
-      return p;
-  }
-  for(l = curlevel+1; l <= baselevel; l++){
-    for(p = ptable.mlfq.queue[l].head; p != 0; p = p->next){
-      if(p->state == RUNNABLE)
+  for(l = curlevel; l <= baselevel; l++){
+    ppin = &ptable.mlfq.pin[l];
+    for(p = *ppin; p != 0; p = p->next){
+      if(p->state == RUNNABLE){
+        *ppin = p;
         return p;
+      }
+    }
+    for(p = ptable.mlfq.queue[l].head; p != *ppin; p = p->next){
+      if(p->state == RUNNABLE){
+        *ppin = p;
+        return p;
+      }
     }
   }
 
