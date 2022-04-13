@@ -134,7 +134,7 @@ concatqueue(int src, int dst){
   if(srcq->head != 0){
     if(dstq->head == 0){
       dstq->head = srcq->head;
-      ptable.mlfq.pin[dst] = srcq->head;
+      ptable.mlfq.pin[dst] = ptable.mlfq.pin[src];
     } else {
       dstq->tail->next = srcq->head;
       srcq->head->prev = dstq->tail;
@@ -535,21 +535,12 @@ wait(void)
 }
 
 struct proc*
-mlfqselect(int curlevel){
+mlfqselect(){
   struct proc *p;
   struct proc **ppin;
   int l, baselevel = NELEM(ptable.mlfq.queue)-1;
 
-  for(l = 0; l < curlevel; l++){
-    ppin = &ptable.mlfq.pin[l];
-    for(p = ptable.mlfq.queue[l].head; p != 0; p = p->next){
-      if(p->state == RUNNABLE){
-        *ppin = p;
-        return p;
-      }
-    }
-  }
-  for(l = curlevel; l <= baselevel; l++){
+  for(l = 0; l <= baselevel; l++){
     ppin = &ptable.mlfq.pin[l];
     for(p = *ppin; p != 0; p = p->next){
       if(p->state == RUNNABLE){
@@ -600,25 +591,16 @@ mlfqlogic(struct proc* p){
   }
   // Priority boost
   if(ptable.mlfq.ticks % BOOSTPERIOD == 0){
-    if(ptable.mlfq.pin[0] == 0){
-      for(l = 1; l <= baselevel; l++){
-        itr = ptable.mlfq.queue[l].head;
-        if(itr){
-          ptable.mlfq.pin[0] = itr;
-          break;
-        }
-      }
-    }
     for(l = 1; l <= baselevel; l++){
       for(itr = ptable.mlfq.queue[l].head; itr != 0; itr = itr->next){
         itr->privlevel = 0;
         itr->ticks = 0;
       }
       concatqueue(l, 0);
-      for(itr = ptable.sleep.head; itr != 0; itr = itr->next){
-        itr->privlevel = 0;
-        itr->ticks = 0;
-      }
+    }
+    for(itr = ptable.sleep.head; itr != 0; itr = itr->next){
+      itr->privlevel = 0;
+      itr->ticks = 0;
     }
   }
 }
@@ -636,7 +618,6 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int curlevel = 0;
   int mlfqpass;
   int i;
 
@@ -650,7 +631,7 @@ scheduler(void)
     // Select next process
     mlfqpass = ptable.mlfq.pass;
     p = getminpass() < mlfqpass ?
-      popheap() : mlfqselect(curlevel);
+      popheap() : mlfqselect();
 
     // Run process
     if(p != 0 && p->state == RUNNABLE) {
@@ -665,7 +646,6 @@ scheduler(void)
       switchkvm();
 
       if(p->type == MLFQ){
-        curlevel = p->privlevel;
         mlfqlogic(p);
       }
       c->proc = 0;
