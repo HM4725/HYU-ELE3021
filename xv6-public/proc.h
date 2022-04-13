@@ -55,12 +55,13 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   enum schedtype type;
-  // Stride part
+  // Stride fields
   int tickets;
   int pass;
-  // MLFQ part
+  // MLFQ fields
   uint ticks;
   int privlevel;
+  // General queue fields
   struct proc *prev;
   struct proc *next;
 };
