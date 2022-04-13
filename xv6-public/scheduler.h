@@ -17,17 +17,17 @@ struct queue {
 };
 
 struct mlfq {
-  // Stride part
+  // Stride fields
   int tickets;
   int pass;
-  // MLFQ part
+  // MLFQ fields
   uint ticks;
-  struct queue queue[QSIZE]; // RUNNING & RUNNABLE
+  struct queue queue[QSIZE];     // RUNNING & RUNNABLE
   struct proc* pin[QSIZE];  
 };
 
 struct stride {
-  int size;
-  struct proc* minheap[NPROC+1]; // RUNNABLE & SLEEP
-  struct queue run;
+  int size;                      // Size of minheap
+  struct proc* minheap[NPROC+1]; // RUNNABLE & SLEEPING
+  struct queue run;              // RUNNING
 };
