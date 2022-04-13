@@ -591,6 +591,7 @@ mlfqlogic(struct proc* p){
   }
   // Priority boost
   if(ptable.mlfq.ticks % BOOSTPERIOD == 0){
+    // RUNNABLE, RUNNING
     for(l = 1; l <= baselevel; l++){
       for(itr = ptable.mlfq.queue[l].head; itr != 0; itr = itr->next){
         itr->privlevel = 0;
@@ -598,6 +599,7 @@ mlfqlogic(struct proc* p){
       }
       concatqueue(l, 0);
     }
+    // SLEEPING
     for(itr = ptable.sleep.head; itr != 0; itr = itr->next){
       itr->privlevel = 0;
       itr->ticks = 0;
