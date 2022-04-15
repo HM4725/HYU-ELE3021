@@ -497,30 +497,24 @@ wait(void)
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
+    prev = 0;
     p = curproc->ochild;
-    if(p){
+    while(p){
       if(p->state == ZOMBIE){
         pid = p->pid;
-        curproc->ochild = p->sibling;
-        if(curproc->ochild == 0)
-          curproc->ychild = 0;
+        if(prev == 0){ // Oldest child
+          curproc->ochild = p->sibling;
+        } else {       // The others
+          prev->sibling = p->sibling;
+        }
+        if(p->sibling == 0)
+          curproc->ychild = prev;
         freeproc(p);
         release(&ptable.lock);
         return pid;
       }
       prev = p;
-      for(p = p->sibling; p != 0; p = p->sibling){
-        if(p->state == ZOMBIE){
-          pid = p->pid;
-          prev->sibling = p->sibling; 
-          if(p->sibling == 0)
-            curproc->ychild = prev;
-          freeproc(p);
-          release(&ptable.lock);
-          return pid;
-        }
-        prev = p;
-      }
+      p = p->sibling;
     }
 
     // No point waiting if we don't have any children.
