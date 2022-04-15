@@ -620,7 +620,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int mlfqpass;
+  int mlfqpass, minpass;
   int i;
 
   c->proc = 0;
@@ -632,8 +632,7 @@ scheduler(void)
 
     // Select next process
     mlfqpass = ptable.mlfq.pass;
-    p = getminpass() < mlfqpass ?
-      popheap() : mlfqselect();
+    p = getminpass() < mlfqpass ? popheap() : mlfqselect();
 
     // Run process
     if(p != 0 && p->state == RUNNABLE) {
@@ -654,16 +653,20 @@ scheduler(void)
     }
 
     // Stride logging
-    if(p == 0 || p->type == MLFQ){
-      if(mlfqpass > THRESHOLD){
-        for(i = 1; i <= ptable.stride.size; i++){
-          ptable.stride.minheap[i]->pass -= mlfqpass;
-        }
-        for(p = ptable.stride.run.head; p != 0; p = p->next){
-          p->pass -= mlfqpass;
-        }
-        ptable.mlfq.pass = 0;
+      // Pass overflow handling
+    minpass = p == 0 || p->type == MLFQ ?
+      ptable.mlfq.pass : p->pass;
+    if(minpass > THRESHOLD){
+      for(i = 1; i <= ptable.stride.size; i++){
+        ptable.stride.minheap[i]->pass -= minpass;
       }
+      for(p = ptable.stride.run.head; p != 0; p = p->next){
+        p->pass -= minpass;
+      }
+      ptable.mlfq.pass -= minpass;
+    }
+      // Pass increases by stride
+    if(p == 0 || p->type == MLFQ){
       ptable.mlfq.pass += STRD(ptable.mlfq.tickets);
     } else if(p->type == STRIDE){
       if(p->state == RUNNABLE || p->state == SLEEPING){
