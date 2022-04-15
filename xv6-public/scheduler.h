@@ -8,7 +8,7 @@
 #define LARGENUM 1000
 #define RESERVE 20
 #define MAXINT 0x7fffffff
-#define THRESHOLD 0x6fffffff
+#define BARRIER 0x6fffffff
 #define STRD(t) (LARGENUM / (t))
 
 struct queue {

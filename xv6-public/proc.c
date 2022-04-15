@@ -656,7 +656,7 @@ scheduler(void)
       // Pass overflow handling
     minpass = p == 0 || p->type == MLFQ ?
       ptable.mlfq.pass : p->pass;
-    if(minpass > THRESHOLD){
+    if(minpass > BARRIER){
       for(i = 1; i <= ptable.stride.size; i++){
         ptable.stride.minheap[i]->pass -= minpass;
       }
