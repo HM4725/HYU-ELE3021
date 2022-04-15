@@ -573,9 +573,11 @@ mlfqlogic(struct proc* p){
       }
       break;
     case SLEEPING:
-      if(p->privlevel < baselevel && p->ticks % TA(p->privlevel) == 0){
+      if(p->privlevel < baselevel && p->ticks >= TA(p->privlevel)){
         p->privlevel++;
         p->ticks = 0;
+      } else {
+        p->ticks = p->ticks / TQ(p->privlevel) * TQ(p->privlevel);
       }
       break;
     case ZOMBIE:
