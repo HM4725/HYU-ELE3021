@@ -603,6 +603,35 @@ mlfqlogic(struct proc* p){
   }
 }
 
+void
+stridelogic(struct proc *p){
+  int minpass;
+  int i;
+
+  // Pass overflow handling
+  minpass = p == 0 || p->type == MLFQ ?
+    ptable.mlfq.pass : p->pass;
+  if(minpass > BARRIER){
+    for(i = 1; i <= ptable.stride.size; i++){
+      ptable.stride.minheap[i]->pass -= minpass;
+    }
+    for(p = ptable.stride.run.head; p != 0; p = p->next){
+      p->pass -= minpass;
+    }
+    ptable.mlfq.pass -= minpass;
+  }
+
+  // Pass increases by stride
+  if(p == 0 || p->type == MLFQ){
+    ptable.mlfq.pass += STRD(ptable.mlfq.tickets);
+  } else if(p->type == STRIDE){
+    if(p->state == RUNNABLE || p->state == SLEEPING){
+      p->pass += STRD(p->tickets);
+      pushheap(p);
+    }
+  }
+}
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -616,8 +645,6 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int minpass;
-  int i;
 
   c->proc = 0;
 
@@ -648,28 +675,8 @@ scheduler(void)
       c->proc = 0;
     }
 
-    // Stride logging
-      // Pass overflow handling
-    minpass = p == 0 || p->type == MLFQ ?
-      ptable.mlfq.pass : p->pass;
-    if(minpass > BARRIER){
-      for(i = 1; i <= ptable.stride.size; i++){
-        ptable.stride.minheap[i]->pass -= minpass;
-      }
-      for(p = ptable.stride.run.head; p != 0; p = p->next){
-        p->pass -= minpass;
-      }
-      ptable.mlfq.pass -= minpass;
-    }
-      // Pass increases by stride
-    if(p == 0 || p->type == MLFQ){
-      ptable.mlfq.pass += STRD(ptable.mlfq.tickets);
-    } else if(p->type == STRIDE){
-      if(p->state == RUNNABLE || p->state == SLEEPING){
-        p->pass += STRD(p->tickets);
-        pushheap(p);
-      }
-    }
+    // Log stride
+    stridelogic(p);
 
     release(&ptable.lock);
   }
