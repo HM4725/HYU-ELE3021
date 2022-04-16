@@ -616,7 +616,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int mlfqpass, minpass;
+  int minpass;
   int i;
 
   c->proc = 0;
@@ -627,8 +627,8 @@ scheduler(void)
     acquire(&ptable.lock);
 
     // Select next process
-    mlfqpass = ptable.mlfq.pass;
-    p = getminpass() < mlfqpass ? popheap() : mlfqselect();
+    p = getminpass() < ptable.mlfq.pass ?
+      popheap() : mlfqselect();
 
     // Run process
     if(p != 0 && p->state == RUNNABLE) {
