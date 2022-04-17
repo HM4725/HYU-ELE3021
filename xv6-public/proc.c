@@ -30,7 +30,18 @@ static void pushqueue(int, struct proc*);
 static void popqueue(int, struct proc*);
 static int getminpass(void);
 
-// Stride scheduler helper functions
+// New functions
+
+// inctick is used in sys_sleep
+// It prevents gaming the scheduler.
+void
+inctick(void) {
+  acquire(&ptable.lock);
+  myproc()->ticks++;
+  release(&ptable.lock);
+}
+
+// set_cpu_share is used in sys_set_cpu_share
 int set_cpu_share(int share){
   struct proc *p;
   int remain;
@@ -63,12 +74,17 @@ int set_cpu_share(int share){
   }
 }
 
+// getminpass is a function which returns
+// the minimum pass value of stride heap.
 static int
 getminpass(void){
   return ptable.stride.size > 0 ?
     ptable.stride.minheap[1]->pass : MAXINT;
 }
 
+// pushheap is used for the stride scheduler.
+// This heap is a min-heap for the pass of process.
+// RUNNABLE, SLEEPING states are managed in it.
 static void
 pushheap(struct proc *p){
   int i = ++ptable.stride.size;
@@ -81,6 +97,7 @@ pushheap(struct proc *p){
   minheap[i] = p;
 }
 
+// pushheap is used for the stride scheduler.
 static struct proc*
 popheap(){
   int parent, child;
@@ -98,6 +115,14 @@ popheap(){
   return min;
 }
 
+// pushqueue is used in stride run queue,
+// free queue, sleep queue, and MLFQ queues.
+// It is a universal queue function.
+// For each queue, the states are different.
+//   STRIDEQ: RUNNING
+//   FREEQ  : UNUSED
+//   SLEEPQ : SLEEPING
+//   MLFQ   : RUNNING, RUNNABLE
 static void
 pushqueue(int level, struct proc *p){
   struct queue *queue;
@@ -126,6 +151,9 @@ pushqueue(int level, struct proc *p){
   }
 }
 
+// concatqueue is used in MLFQ queues.
+// It is a only way to move the process upward,
+// and called when priority boost.
 static void
 concatqueue(int src, int dst){
   struct queue *srcq = &ptable.mlfq.queue[src];
@@ -145,6 +173,9 @@ concatqueue(int src, int dst){
   }
 }
 
+// popqueue is used in stride run queue,
+// free queue, sleep queue, and MLFQ queues.
+// It is a universal queue function.
 static void
 popqueue(int level, struct proc *p){
   struct queue *queue;
@@ -173,14 +204,7 @@ popqueue(int level, struct proc *p){
   p->prev = 0;
   p->next = 0;
 }
-
-void
-inctick(void) {
-  acquire(&ptable.lock);
-  myproc()->ticks++;
-  release(&ptable.lock);
-}
-// End of scheduling helper part
+// New functions end
 
 void
 pinit(void)
