@@ -43,7 +43,8 @@ inctick(void)
 }
 
 // set_cpu_share is used in sys_set_cpu_share
-int set_cpu_share(int share)
+int
+set_cpu_share(int share)
 {
   struct proc *p;
   int remain;
