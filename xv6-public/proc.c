@@ -35,14 +35,16 @@ static int getminpass(void);
 // inctick is used in sys_sleep
 // It prevents gaming the scheduler.
 void
-inctick(void) {
+inctick(void)
+{
   acquire(&ptable.lock);
   myproc()->ticks++;
   release(&ptable.lock);
 }
 
 // set_cpu_share is used in sys_set_cpu_share
-int set_cpu_share(int share){
+int set_cpu_share(int share)
+{
   struct proc *p;
   int remain;
   int minpass, mlfqpass;
@@ -77,7 +79,8 @@ int set_cpu_share(int share){
 // getminpass is a function which returns
 // the minimum pass value of stride heap.
 static int
-getminpass(void){
+getminpass(void)
+{
   return ptable.stride.size > 0 ?
     ptable.stride.minheap[1]->pass : MAXINT;
 }
@@ -86,7 +89,8 @@ getminpass(void){
 // This heap is a min-heap for the pass of process.
 // RUNNABLE, SLEEPING states are managed in it.
 static void
-pushheap(struct proc *p){
+pushheap(struct proc *p)
+{
   int i = ++ptable.stride.size;
   struct proc **minheap = ptable.stride.minheap;
 
@@ -99,7 +103,8 @@ pushheap(struct proc *p){
 
 // pushheap is used for the stride scheduler.
 static struct proc*
-popheap(){
+popheap()
+{
   int parent, child;
   struct proc **minheap = ptable.stride.minheap;
   struct proc *min = minheap[1];
@@ -124,7 +129,8 @@ popheap(){
 //   SLEEPQ : SLEEPING
 //   MLFQ   : RUNNING, RUNNABLE
 static void
-pushqueue(int level, struct proc *p){
+pushqueue(int level, struct proc *p)
+{
   struct queue *queue;
 
   switch(level) {
@@ -155,7 +161,8 @@ pushqueue(int level, struct proc *p){
 // It is a only way to move the process upward,
 // and called when priority boost.
 static void
-concatqueue(int src, int dst){
+concatqueue(int src, int dst)
+{
   struct queue *srcq = &ptable.mlfq.queue[src];
   struct queue *dstq = &ptable.mlfq.queue[dst];
 
@@ -177,7 +184,8 @@ concatqueue(int src, int dst){
 // free queue, sleep queue, and MLFQ queues.
 // It is a universal queue function.
 static void
-popqueue(int level, struct proc *p){
+popqueue(int level, struct proc *p)
+{
   struct queue *queue;
   struct proc **ppin;
 
