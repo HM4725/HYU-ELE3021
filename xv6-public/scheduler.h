@@ -1,12 +1,9 @@
-#define QSIZE 3
-#define BOOSTPERIOD 100
 #define SLEEPQ -1
 #define FREEQ -2
 #define STRIDEQ -3
-#define TQ(l) (l==0 ? 1 : l==1 ? 2 : 4)
-#define TA(l) (l==0 ? 5 : 10)
+#define TQ(l) (l==0 ? 1 : 2*l)
+#define TA(l) (5*TQ(l))
 #define LARGENUM 1000
-#define RESERVE 20
 #define MAXINT 0x7fffffff
 #define BARRIER 0x6fffffff
 #define STRD(t) (LARGENUM / (t))
