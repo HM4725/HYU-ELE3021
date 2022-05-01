@@ -61,8 +61,7 @@ struct proc {
   uint ticks;
   int privlevel;
   // General queue fields
-  struct proc *prev;
-  struct proc *next;
+  struct list_head queue;      // Sleep, Free, MLFQ
 };
 
 // Process memory is laid out contiguously, low addresses first:
