@@ -44,9 +44,8 @@ struct proc {
   enum procstate state;        // Process state
   int pid;                     // Process ID
   struct proc *parent;         // Parent process
-  struct proc *sibling;
-  struct proc *ochild;         // Oldest child process
-  struct proc *ychild;         // Youngest child process
+  struct list_head children;
+  struct list_head sibling;
   struct trapframe *tf;        // Trap frame for current syscall
   struct context *context;     // swtch() here to run process
   void *chan;                  // If non-zero, sleeping on chan

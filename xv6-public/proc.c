@@ -4,6 +4,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "x86.h"
+#include "list.h"
 #include "proc.h"
 #include "spinlock.h"
 #include "scheduler.h"
@@ -292,6 +293,9 @@ found:
 
   release(&ptable.lock);
 
+  list_head_init(&p->children);
+  list_head_init(&p->sibling);
+
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
@@ -401,18 +405,10 @@ fork(void)
     return -1;
   }
   np->sz = curproc->sz;
-  np->ochild = 0;
-  np->ychild = 0;
   np->parent = curproc;
-  if(curproc->ochild == 0){
-    curproc->ochild = np; 
-    curproc->ychild = np; 
-  } else {
-    curproc->ychild->sibling = np;
-    curproc->ychild = np;
-  }
-  *np->tf = *curproc->tf;
+  list_add_tail(&np->sibling, &curproc->children);
 
+  *np->tf = *curproc->tf;
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -443,8 +439,8 @@ fork(void)
 void
 exit(void)
 {
-  struct proc *curproc = myproc();
-  struct proc *p;
+  struct proc *p, *curproc = myproc();
+  struct list_head *children, *itr;
   int fd;
 
   if(curproc == initproc)
@@ -469,20 +465,15 @@ exit(void)
   wakeup1(curproc->parent);
 
   // Pass abandoned children to init.
-  if(curproc->ochild) {
-    if(initproc->ochild == 0) {
-      initproc->ochild = curproc->ochild;
-      initproc->ychild = curproc->ychild;
-    } else {
-      initproc->ychild->sibling = curproc->ochild;
-      initproc->ychild = curproc->ychild;
-    }
-    for(p = curproc->ochild; p != 0; p = p->sibling) {
-      p->parent = initproc;
-      if(p->state == ZOMBIE)
-        wakeup1(initproc);
-    }
+  children = &curproc->children;
+  for(itr = children->next; itr != children; itr = itr->next){
+    p = container_of(itr, struct proc, sibling);
+    p->parent = initproc;
+    if(p->state == ZOMBIE)
+      wakeup1(initproc);
   }
+  list_bulk_move_tail(&curproc->children,
+                      &initproc->children);
 
   // Jump into the scheduler, never to return.
   if(curproc->type == MLFQ){
@@ -504,9 +495,6 @@ freeproc(struct proc *p)
   freevm(p->pgdir);
   p->pid = 0;
   p->parent = 0;
-  p->sibling = 0;
-  p->ochild = 0;
-  p->ychild = 0;
   p->name[0] = 0;
   p->killed = 0;
   p->tickets = 0;
@@ -523,35 +511,28 @@ freeproc(struct proc *p)
 int
 wait(void)
 {
-  struct proc *p, *prev;
+  struct proc *p;
+  struct list_head *children, *itr;
   int pid;
   struct proc *curproc = myproc();
   
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
-    prev = 0;
-    p = curproc->ochild;
-    while(p){
+    children = &curproc->children;
+    for(itr = children->next; itr != children; itr = itr->next){
+      p = container_of(itr, struct proc, sibling);
       if(p->state == ZOMBIE){
         pid = p->pid;
-        if(prev == 0){ // Oldest child
-          curproc->ochild = p->sibling;
-        } else {       // The others
-          prev->sibling = p->sibling;
-        }
-        if(p->sibling == 0)
-          curproc->ychild = prev;
+        list_del(itr);
         freeproc(p);
         release(&ptable.lock);
         return pid;
       }
-      prev = p;
-      p = p->sibling;
     }
 
     // No point waiting if we don't have any children.
-    if(curproc->ochild == 0 || curproc->killed){
+    if(list_empty(children) || curproc->killed){
       release(&ptable.lock);
       return -1;
     }

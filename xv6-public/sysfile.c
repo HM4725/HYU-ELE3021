@@ -9,6 +9,7 @@
 #include "param.h"
 #include "stat.h"
 #include "mmu.h"
+#include "list.h"
 #include "proc.h"
 #include "fs.h"
 #include "spinlock.h"

@@ -8,6 +8,12 @@
 #define BARRIER 0x6fffffff
 #define STRD(t) (LARGENUM / (t))
 
+#define container_of(ptr, type, member) ({                          \
+            const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+            (type *)( (char *)__mptr - offsetof(type,member) );})
+
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
+
 struct queue {
   struct proc *head;
   struct proc *tail;
