@@ -17,3 +17,5 @@ mkfs
 
 cscope.*
 *.swp
+
+utuser.c
