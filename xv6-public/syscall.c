@@ -19,11 +19,15 @@ int
 fetchint(uint addr, int *ip)
 {
   struct proc *curproc = myproc();
+  uint base1 = 0, bound1 = curproc->sz;
+  uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
 
-  if(addr >= curproc->sz || addr+4 > curproc->sz)
+  if((addr >= base1 && addr+4 <= bound1) ||
+     (addr >= base2 && addr+4 <= bound2)){
+    *ip = *(int*)(addr);
+    return 0;
+  } else
     return -1;
-  *ip = *(int*)(addr);
-  return 0;
 }
 
 // Fetch the nul-terminated string at addr from the current process.
@@ -34,14 +38,23 @@ fetchstr(uint addr, char **pp)
 {
   char *s, *ep;
   struct proc *curproc = myproc();
+  uint base1 = 0, bound1 = curproc->sz;
+  uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
 
-  if(addr >= curproc->sz)
-    return -1;
-  *pp = (char*)addr;
-  ep = (char*)curproc->sz;
-  for(s = *pp; s < ep; s++){
-    if(*s == 0)
-      return s - *pp;
+  if(addr >= base1 && addr < bound1){
+    *pp = (char*)addr;
+    ep = (char*)bound1;
+    for(s = *pp; s < ep; s++){
+      if(*s == 0)
+        return s - *pp;
+    }
+  } else if(addr >= base2 && addr < bound2){
+    *pp = (char*)addr;
+    ep = (char*)bound2;
+    for(s = *pp; s < ep; s++){
+      if(*s == 0)
+        return s - *pp;
+    }
   }
   return -1;
 }
@@ -61,13 +74,20 @@ argptr(int n, char **pp, int size)
 {
   int i;
   struct proc *curproc = myproc();
+  uint base1 = 0, bound1 = curproc->sz;
+  uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
  
   if(argint(n, &i) < 0)
     return -1;
-  if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
+  if(size >= 0){
+    if(((uint)i >= base1 && (uint)i+size <= bound1) ||
+       ((uint)i >= base2 && (uint)i+size <= bound2)){
+      *pp = (char*)i;
+      return 0;
+    } else
+      return -1;
+  } else
     return -1;
-  *pp = (char*)i;
-  return 0;
 }
 
 // Fetch the nth word-sized system call argument as a string pointer.

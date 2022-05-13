@@ -361,13 +361,15 @@ fork(void)
   }
 
   // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz,
+                          curproc->ustack)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
     list_add(&np->queue, &ptable.free);
     return -1;
   }
+  np->ustack = curproc->ustack;
   np->sz = curproc->sz;
   np->parent = curproc;
   list_add_tail(&np->sibling, &curproc->children);
