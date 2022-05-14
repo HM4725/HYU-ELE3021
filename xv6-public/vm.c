@@ -401,6 +401,20 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   return 0;
 }
 
+int
+allocustack(pde_t *pgdir, uint ustack)
+{
+  uint sb;
+
+  sb = PGROUNDDOWN(ustack);
+  // allocate ustack
+  if(allocuvm(pgdir, sb - PGSIZE, ustack + USTACKSIZE) == 0)
+    return -1;
+  // allocate guard page
+  clearpteu(pgdir, (char*)(sb - PGSIZE));
+  return 0;
+}
+
 //PAGEBREAK!
 // Blank page.
 //PAGEBREAK!
