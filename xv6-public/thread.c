@@ -8,6 +8,7 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "scheduler.h"
+#include "thread.h"
 
 extern struct ptable ptable;
 
@@ -119,7 +120,7 @@ thread_create(thread_t *thread,
   sp -= 4;
   *(uint *)sp = (uint)arg;
   sp -= 4;
-  *(uint *)sp = 0xffffffff;
+  *(uint *)sp = MAGICEXIT;
 
   // Set thread
   nth->tid = thlast->tid + 1;
@@ -166,9 +167,9 @@ thread_exit(void *retval)
     curth->ofile[fd] = 0;
   curth->cwd = 0;
 
-  curth->retval = retval;
-
   acquire(&ptable.lock);
+
+  curth->retval = retval;
   wakeup1(curth->thmain);
 
   if(curth->type == MLFQ)

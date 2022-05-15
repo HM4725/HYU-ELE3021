@@ -174,7 +174,15 @@ switchuvm(struct proc *p)
   // forbids I/O instructions (e.g., inb and outb) from user space
   mycpu()->ts.iomb = (ushort) 0xFFFF;
   ltr(SEG_TSS << 3);
-  lcr3(V2P(p->pgdir));  // switch to process's address space
+  lcr3(V2P(p->pgdir));
+  popcli();
+}
+
+void
+vswitchuvm(struct proc *p)
+{
+  pushcli();
+  mycpu()->ts.esp0 = (uint)p->kstack + KSTACKSIZE;
   popcli();
 }
 

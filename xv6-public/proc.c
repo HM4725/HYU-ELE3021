@@ -564,8 +564,6 @@ mlfqlogic(struct proc *p){
   struct proc *pitr;
   int l, baselevel = QSIZE-1;
 
-  thmain->ticks++;
-  ptable.mlfq.ticks++;
   l = thmain->privlevel;
   if(l < baselevel && thmain->ticks >= TA(l)){
     dequeue_proc(p);
@@ -672,11 +670,9 @@ scheduler(void)
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
-      switchkvm();
+      // switchkvm();  same mapping - redundant?
 
       if(p->type == MLFQ){
-        if(p != c->proc)
-          cprintf("shit!\n");
         mlfqlogic(c->proc);
       }
       c->proc = 0;
@@ -701,6 +697,8 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
+  struct proc *thmain = p->thmain;
+  struct proc *thnext = next_thread(p);
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
@@ -711,7 +709,24 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
-  swtch(&p->context, mycpu()->scheduler);
+
+  thmain->ticks++;
+  if(thmain->type == MLFQ)
+    ptable.mlfq.ticks++;
+  if(thnext == 0 || thmain->ticks % DTQ == 0){
+    swtch(&p->context, mycpu()->scheduler);
+  } else {
+    if(p != thnext){
+    // TODO: Fix vswitch panic bug
+      //vswitchuvm(thnext);
+      switchuvm(thnext);
+      mycpu()->proc = thnext;
+      thnext->state = RUNNING;
+      swtch(&p->context, thnext->context);
+    } else {
+      p->state = RUNNING;
+    }
+  }
   mycpu()->intena = intena;
 }
 
