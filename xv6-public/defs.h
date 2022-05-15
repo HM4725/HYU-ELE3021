@@ -106,11 +106,11 @@ int             pipewrite(struct pipe*, char*, int);
 int             cpuid(void);
 void            exit(void);
 int             fork(void);
+struct proc*    allocproc(void);
 int             growproc(int);
 int             kill(int);
 struct cpu*     mycpu(void);
 struct proc*    myproc(void);
-void            inctick(void);
 void            pinit(void);
 void            procdump(void);
 void            scheduler(void) __attribute__((noreturn));
@@ -118,9 +118,12 @@ void            sched(void);
 void            sleep(void*, struct spinlock*);
 void            userinit(void);
 int             wait(void);
+void            wakeup1(void*);
 void            wakeup(void*);
 void            yield(void);
 int             set_cpu_share(int);
+struct proc*    enqueue_thread(struct proc*, void *);
+struct proc*    dequeue_thread(struct proc*);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -157,6 +160,16 @@ int             fetchint(uint, int*);
 int             fetchstr(uint, char**);
 void            syscall(void);
 
+// thread.c
+typedef struct proc* (*callback0)(struct proc*);
+typedef struct proc* (*callback1)(struct proc*, void*);
+struct proc*    threads_apply0(struct proc*, callback0);
+struct proc*    threads_apply1(struct proc*, callback1, void*);
+struct proc*    next_thread(struct proc*);
+int             thread_create(thread_t*, thread_routine, void*);
+void            thread_exit(void*);
+int             thread_join(thread_t, void **);
+
 // timer.c
 void            timerinit(void);
 
@@ -187,6 +200,7 @@ void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
 int             allocustack(pde_t *pgdir, uint ustack);
+void            deallocustack(pde_t *pgdir, uint ustack);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

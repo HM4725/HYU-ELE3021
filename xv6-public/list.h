@@ -76,6 +76,16 @@ list_del(struct list_head *entry)
   entry->next = 0;
 }
 
+static inline void
+list_replace(struct list_head *old,
+			 struct list_head *new)
+{
+  new->next = old->next;
+  new->next->prev = new;
+  new->prev = old->prev;
+  new->prev->next = new;
+}
+
 static inline int
 list_empty(struct list_head *head)
 {

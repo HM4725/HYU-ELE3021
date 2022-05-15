@@ -65,9 +65,9 @@ exec(char *path, char **argv)
   // Make the first inaccessible.  Use the second as the user stack.
   sz = PGROUNDUP(sz);
 
-  if(allocustack(pgdir, USERTOP - USTACKSIZE) < 0)
-    goto bad;
   curproc->ustack = USERTOP - USTACKSIZE;
+  if(allocustack(pgdir, USERTOP - USTACKSIZE) == 0)
+    goto bad;
   sp = USERTOP;
 
   // Push argument strings, prepare rest of stack in ustack.

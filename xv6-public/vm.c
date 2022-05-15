@@ -409,10 +409,17 @@ allocustack(pde_t *pgdir, uint ustack)
   sb = PGROUNDDOWN(ustack);
   // allocate ustack
   if(allocuvm(pgdir, sb - PGSIZE, ustack + USTACKSIZE) == 0)
-    return -1;
+    return 0;
   // allocate guard page
   clearpteu(pgdir, (char*)(sb - PGSIZE));
-  return 0;
+  return ustack;
+}
+
+void
+deallocustack(pde_t *pgdir, uint ustack)
+{
+  deallocuvm(pgdir, ustack + USTACKSIZE,
+                    PGROUNDDOWN(ustack) - PGSIZE);
 }
 
 //PAGEBREAK!

@@ -13,5 +13,5 @@
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
 #define FSSIZE       1000    // size of file system in blocks
 #define QSIZE           3    // total levels size of mlfq
-#define BOOSTINTERVAL 100    // ticks interval of priority boost
+#define BOOSTINTERVAL 200    // ticks interval of priority boost
 #define RESERVE        20    // required tickets reserve of mlfq 

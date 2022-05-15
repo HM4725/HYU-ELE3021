@@ -24,6 +24,7 @@ OBJS = \
 	sysproc.o\
 	trapasm.o\
 	trap.o\
+    thread.o\
 	uart.o\
 	vectors.o\
 	vm.o\
@@ -185,6 +186,8 @@ UPROGS=\
     _mlfqtest\
     _stridetest\
     _test_scheduler\
+    _test_thread\
+    _test_thread2\
     _time\
 
 fs.img: mkfs README $(UPROGS)
@@ -256,7 +259,7 @@ EXTRA=\
 	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c\
 	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
 	printf.c umalloc.c utuser.c mlfqtest.c stridetest.c\
-    test_scheduler.c time.c\
+    test_scheduler.c test_thread.c test_thread2.c time.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\
 

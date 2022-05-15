@@ -9,14 +9,7 @@
 #include "spinlock.h"
 #include "scheduler.h"
 
-struct {
-  struct spinlock lock;
-  struct proc proc[NPROC];
-  struct mlfq mlfq;
-  struct stride stride;
-  struct list_head sleep;
-  struct list_head free;
-} ptable;
+struct ptable ptable;
 
 static struct proc *initproc;
 
@@ -24,24 +17,10 @@ int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
-static void wakeup1(void *chan);
-
 static void pushheap(struct proc*);
-static void enqueue(int, struct proc*);
-static void dequeue(struct proc*);
+static void enqueue_proc(struct proc*, int);
+static void dequeue_proc(struct proc*);
 static int getminpass(void);
-
-// New functions
-
-// inctick is used in sys_sleep
-// It prevents gaming the scheduler.
-void
-inctick(void)
-{
-  acquire(&ptable.lock);
-  myproc()->ticks++;
-  release(&ptable.lock);
-}
 
 // set_cpu_share is used in sys_set_cpu_share
 int
@@ -61,12 +40,12 @@ set_cpu_share(int share)
     remain += p->tickets;
   if(remain - share >= RESERVE){
     if(p->type == MLFQ){
-      dequeue(p);
+      dequeue_proc(p);
       minpass = getminpass();
       mlfqpass = ptable.mlfq.pass;
       p->pass = minpass < mlfqpass ? minpass : mlfqpass;
       p->type = STRIDE;
-      list_add(&p->queue, &ptable.stride.run);
+      list_add(&p->run, &ptable.stride.run);
     }
     ptable.mlfq.tickets = remain - share;
     p->tickets = share;
@@ -125,13 +104,20 @@ popheap()
 // enqueue pushes proc to MLFQ.
 // In MLFQ, proc states are as following:
 //   RUNNING, RUNNABLE
-static void
-enqueue(int level, struct proc *p)
+struct proc*
+enqueue_thread(struct proc* th, void *level)
 {
   struct list_head *queue;
-
-  queue = &ptable.mlfq.queue[level];
-  list_add_tail(&p->queue, queue);
+  queue = &ptable.mlfq.queue[(int)level];
+  if(th->state == RUNNABLE || th->state == RUNNING){
+    list_add_tail(&th->mlfq, queue);
+  }
+  return 0;
+}
+static void
+enqueue_proc(struct proc *p, int level)
+{
+  threads_apply1(p, enqueue_thread, (void*)level);
 }
 
 // concatqueue is used in MLFQ queues.
@@ -155,20 +141,28 @@ concatqueue(int src, int dst)
 // dequeue pops proc from MLFQ.
 // In MLFQ, proc states are as following:
 //   RUNNING, RUNNABLE
-static void
-dequeue(struct proc *p)
+struct proc*
+dequeue_thread(struct proc *th)
 {
   struct list_head **ppin;
-  struct list_head *itr;
+  struct list_head *mlfq;
+  int level;
 
-  ppin = &ptable.mlfq.pin[p->privlevel];
-  itr = &p->queue;
-
-  if(*ppin == itr)
-    *ppin = itr->next;
-  list_del(&p->queue);
+  if(th->state == RUNNABLE || th->state == RUNNING){
+    level = th->thmain->privlevel;
+    ppin = &ptable.mlfq.pin[level];
+    mlfq = &th->mlfq;
+    if(*ppin == mlfq)
+      *ppin = mlfq->next;
+    list_del(mlfq);
+  }
+  return 0;
 }
-// New functions end
+static void
+dequeue_proc(struct proc *p)
+{
+  threads_apply0(p, dequeue_thread); 
+}
 
 void
 pinit(void)
@@ -186,7 +180,7 @@ pinit(void)
   list_head_init(&ptable.sleep);
   list_head_init(&ptable.free);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    list_add_tail(&p->queue, &ptable.free);
+    list_add_tail(&p->free, &ptable.free);
 
   ptable.mlfq.tickets = 100;
 }
@@ -235,7 +229,7 @@ myproc(void) {
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
-static struct proc*
+struct proc*
 allocproc(void)
 {
   struct proc *p;
@@ -244,8 +238,8 @@ allocproc(void)
   acquire(&ptable.lock);
 
   if(!list_empty(&ptable.free)){
-    p = list_first_entry(&ptable.free, struct proc, queue);
-    list_del(&p->queue);
+    p = list_first_entry(&ptable.free, struct proc, free);
+    list_del(&p->free);
     goto found;
   }
 
@@ -263,7 +257,7 @@ found:
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
-    list_add(&p->queue, &ptable.free);
+    list_add(&p->free, &ptable.free);
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
@@ -300,6 +294,8 @@ userinit(void)
     panic("userinit: out of memory?");
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
   p->sz = PGSIZE;
+  list_head_init(&p->thgroup);
+  p->thmain = p;
   memset(p->tf, 0, sizeof(*p->tf));
   p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
   p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
@@ -319,7 +315,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
-  enqueue(p->privlevel, p);
+  enqueue_proc(p, p->privlevel);
 
   release(&ptable.lock);
 }
@@ -332,16 +328,22 @@ growproc(int n)
   uint sz;
   struct proc *curproc = myproc();
 
-  sz = curproc->sz;
+  acquire(&ptable.lock);
+  sz = curproc->thmain->sz;
   if(n > 0){
-    if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
+    if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0){
+      release(&ptable.lock);
       return -1;
+    }
   } else if(n < 0){
-    if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
+    if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0){
+      release(&ptable.lock);
       return -1;
+    }
   }
-  curproc->sz = sz;
+  curproc->thmain->sz = sz;
   switchuvm(curproc);
+  release(&ptable.lock);
   return 0;
 }
 
@@ -366,13 +368,15 @@ fork(void)
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
-    list_add(&np->queue, &ptable.free);
+    list_add(&np->free, &ptable.free);
     return -1;
   }
   np->ustack = curproc->ustack;
   np->sz = curproc->sz;
   np->parent = curproc;
   list_add_tail(&np->sibling, &curproc->children);
+  np->thmain = np;
+  list_head_init(&np->thgroup);
 
   *np->tf = *curproc->tf;
   // Clear %eax so that fork returns 0 in the child.
@@ -392,7 +396,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
-  enqueue(np->privlevel, np);
+  enqueue_proc(np, np->thmain->privlevel);
 
   release(&ptable.lock);
 
@@ -443,10 +447,10 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   if(curproc->type == MLFQ){
-    dequeue(curproc);
+    dequeue_proc(curproc);
   } else { // STRIDE
     ptable.mlfq.tickets += curproc->tickets;
-    list_del(&curproc->queue);
+    list_del(&curproc->run);
   }
   curproc->state = ZOMBIE;
   sched();
@@ -468,7 +472,7 @@ freeproc(struct proc *p)
   p->ticks = 0;
   p->privlevel = 0;
   p->state = UNUSED;
-  list_add(&p->queue, &ptable.free);
+  list_add(&p->free, &ptable.free);
 }
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
@@ -486,7 +490,7 @@ wait(void)
     children = &curproc->children;
     for(itr = children->next; itr != children; itr = itr->next){
       p = list_entry(itr, struct proc, sibling);
-      if(p->state == ZOMBIE){
+      if(p->tid == 0 && p->state == ZOMBIE){
         pid = p->pid;
         list_del(itr);
         freeproc(p);
@@ -507,27 +511,44 @@ wait(void)
 }
 
 struct proc*
+next_proc(struct proc *p)
+{
+  struct proc *np;
+  struct list_head *q, *start, *itr;
+  int level = p->thmain->privlevel;
+
+  q = &ptable.mlfq.queue[level];
+  start = &p->mlfq;
+  for(itr = start->next; itr != start; itr = itr->next){
+    if(!list_is_head(itr, q)){
+      np = list_entry(itr, struct proc, mlfq);
+      if(np->pid != p->pid && np->state == RUNNABLE)
+        return np;
+    }
+  }
+  return 0;
+}
+
+struct proc*
 mlfqselect(){
-  struct proc *p;
+  struct proc *p, *np;
   struct list_head *q;
   struct list_head **ppin;
-  struct list_head *itr;
   int l;
 
   for(l = 0; l < QSIZE; l++){
     q = &ptable.mlfq.queue[l];
-    ppin = &ptable.mlfq.pin[l];
-    itr = *ppin;
-    do {
-      if(!list_is_head(itr, q)){
-        p = list_entry(itr, struct proc, queue);
-        if(p->state == RUNNABLE){
-          *ppin = itr;
-          return p;
-        }
+    if(!list_empty(q)){
+      ppin = &ptable.mlfq.pin[l];
+      if(*ppin == q){
+        p = list_first_entry(q, struct proc, mlfq);
+      } else {
+        p = list_entry(*ppin, struct proc, mlfq);
       }
-      itr = itr->next;
-    } while(itr != *ppin);
+      np = next_proc(p);
+      *ppin = np != 0 ? &np->mlfq : q;
+      return p;
+    }
   }
 
   return 0;
@@ -535,45 +556,37 @@ mlfqselect(){
 
 void
 mlfqlogic(struct proc *p){
-  struct list_head **ppin = &ptable.mlfq.pin[p->privlevel];
+  struct proc *np;
+  struct proc *thmain = p->thmain;
+  struct list_head **ppin;
   struct list_head *q;
   struct list_head *itr;
   struct proc *pitr;
-  int l, baselevel = QSIZE - 1;
+  int l, baselevel = QSIZE-1;
 
+  thmain->ticks++;
   ptable.mlfq.ticks++;
-  switch(p->state){
-    case RUNNABLE:
-      p->ticks++;
-      if(p->privlevel < baselevel && p->ticks % TA(p->privlevel) == 0){
-        dequeue(p);
-        p->privlevel++;
-        enqueue(p->privlevel, p);
-        p->ticks = 0;
-      } else if(p->ticks % TQ(p->privlevel) == 0){
-        *ppin = p->queue.next;
-      }
-      break;
-    case SLEEPING:
-      if(p->privlevel < baselevel && p->ticks >= TA(p->privlevel)){
-        p->privlevel++;
-        p->ticks = 0;
-      } else {
-        p->ticks = p->ticks / TQ(p->privlevel) * TQ(p->privlevel);
-      }
-      break;
-    case ZOMBIE:
-      break;
-    default:
-      panic("mlfq wrong state");
+  l = thmain->privlevel;
+  if(l < baselevel && thmain->ticks >= TA(l)){
+    dequeue_proc(p);
+    thmain->privlevel = l+1;
+    thmain->ticks = 0;
+    enqueue_proc(p, l+1);
+  } else {
+    ppin = &ptable.mlfq.pin[l];
+    q = &ptable.mlfq.queue[l];
+    if(*ppin == q){
+      np = next_thread(p);
+      *ppin = np != 0 ? &np->mlfq : &ptable.mlfq.queue[l];
+    }
   }
   // Priority boost
-  if(ptable.mlfq.ticks % BOOSTINTERVAL == 0){
+  if(ptable.mlfq.ticks >= BOOSTINTERVAL){
     // RUNNABLE, RUNNING
     for(l = 1; l <= baselevel; l++){
       q = &ptable.mlfq.queue[l];
       for(itr = q->next; itr != q; itr = itr->next){
-        pitr = list_entry(itr, struct proc, queue);
+        pitr = list_entry(itr, struct proc, mlfq);
         pitr->privlevel = 0;
         pitr->ticks = 0;
       }
@@ -582,10 +595,11 @@ mlfqlogic(struct proc *p){
     // SLEEPING
     q = &ptable.sleep;
     for(itr = q->next; itr != q; itr = itr->next){
-      pitr = list_entry(itr, struct proc, queue);
+      pitr = list_entry(itr, struct proc, sleep);
       pitr->privlevel = 0;
       pitr->ticks = 0;
     }
+    ptable.mlfq.ticks = 0;
   }
 }
 
@@ -606,7 +620,7 @@ stridelogic(struct proc *p){
     }
     q = &ptable.stride.run;
     for(itr = q->next; itr != q; itr = itr->next){
-      pitr = list_entry(itr, struct proc, queue);
+      pitr = list_entry(itr, struct proc, run);
       pitr->pass -= minpass;
     }
     ptable.mlfq.pass -= minpass;
@@ -651,7 +665,7 @@ scheduler(void)
     // Run process
     if(p != 0 && p->state == RUNNABLE) {
       if(p->type == STRIDE)
-        list_add(&p->queue, &ptable.stride.run);
+        list_add(&p->run, &ptable.stride.run);
 
       c->proc = p;
       switchuvm(p);
@@ -661,7 +675,9 @@ scheduler(void)
       switchkvm();
 
       if(p->type == MLFQ){
-        mlfqlogic(p);
+        if(p != c->proc)
+          cprintf("shit!\n");
+        mlfqlogic(c->proc);
       }
       c->proc = 0;
     }
@@ -708,7 +724,7 @@ yield(void)
   acquire(&ptable.lock);  //DOC: yieldlock
   p = myproc();
   if(p->type == STRIDE)
-    list_del(&p->queue);
+    list_del(&p->run);
   p->state = RUNNABLE;
   sched();
   release(&ptable.lock);
@@ -761,12 +777,12 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   if(p->type == MLFQ){
-    dequeue(p);
+    dequeue_thread(p);
   } else {
-    list_del(&p->queue);
+    list_del(&p->run);
   }
   p->state = SLEEPING;
-  list_add(&p->queue, &ptable.sleep);
+  list_add(&p->sleep, &ptable.sleep);
 
   sched();
 
@@ -783,23 +799,23 @@ sleep(void *chan, struct spinlock *lk)
 //PAGEBREAK!
 // Wake up all processes sleeping on chan.
 // The ptable lock must be held.
-static void
+void
 wakeup1(void *chan)
 {
   struct proc *p;
   struct list_head *q;
-  struct list_head *itr, *prev;
+  struct list_head *itr;
 
   q = &ptable.sleep;
-  for(itr = q->next; itr != q; itr = itr->next){
-    p = list_entry(itr, struct proc, queue);
+  itr = q->next;
+  while(itr != q){
+    p = list_entry(itr, struct proc, sleep);
+    itr = itr->next;
     if(p->chan == chan){
-      prev = itr->prev;
-      list_del(itr);
+      list_del(&p->sleep);
       p->state = RUNNABLE;
       if(p->type == MLFQ)
-        enqueue(p->privlevel, p);
-      itr = prev;
+        enqueue_thread(p, (void*)p->thmain->privlevel);
     }
   }
 }
@@ -827,10 +843,10 @@ kill(int pid)
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING){
-        list_del(&p->queue);
+        list_del(&p->sleep);
         p->state = RUNNABLE;
         if(p->type == MLFQ)
-          enqueue(p->privlevel, p);
+          enqueue_thread(p, (void*)p->thmain->privlevel);
       }
       release(&ptable.lock);
       return 0;
@@ -867,7 +883,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %d %s %s", p->pid, p->privlevel, state, p->name);
+    cprintf("%d %d %d %s %s", p->pid, p->privlevel, p->tid, state, p->name);
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)
