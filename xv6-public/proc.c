@@ -333,7 +333,6 @@ allocproc(void)
 
 found:
   p->state = EMBRYO;
-  p->pid = nextpid++;
 
   release(&ptable.lock);
 
@@ -375,6 +374,7 @@ userinit(void)
   p = allocproc();
   
   initproc = p;
+  p->pid = nextpid++;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
@@ -448,6 +448,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+  np->pid = nextpid++;
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz,
