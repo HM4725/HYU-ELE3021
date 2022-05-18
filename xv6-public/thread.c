@@ -169,7 +169,7 @@ thread_create(thread_t *thread,
   nth->state = RUNNABLE;
   if(nth->type == MLFQ)
     enqueue_thread(nth);
-
+  switchuvm(curth);
   release(&ptable.lock);
 
   return 0;

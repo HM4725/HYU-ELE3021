@@ -747,6 +747,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int pid = 0;
 
   c->proc = 0;
 
@@ -765,7 +766,10 @@ scheduler(void)
         list_add(&p->run, &ptable.stride.run);
 
       c->proc = p;
-      switchuvm(p);
+      if(p->pid != pid)
+        switchuvm(p);
+      else
+        vswitchuvm(p);
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
@@ -774,6 +778,7 @@ scheduler(void)
       if(p->type == MLFQ){
         mlfqlogic(c->proc);
       }
+      pid = p->pid;
       c->proc = 0;
     }
 
@@ -794,7 +799,7 @@ scheduler(void)
 void
 sched(void)
 {
-  int intena, tq;
+  int intena;
   struct proc *p = myproc();
   struct proc *thmain = main_thread(p);
   struct proc *nxt = ready_thread(p);
@@ -810,19 +815,13 @@ sched(void)
   intena = mycpu()->intena;
 
   thmain->ticks++;
-  if(thmain->type == MLFQ){
+  if(thmain->type == MLFQ)
     ptable.mlfq.ticks++;
-    tq = TQ(thmain->privlevel);
-  } else {
-    tq = DTQ;
-  }
-  if(nxt == 0 || thmain->ticks % tq == 0){
+  if(nxt == 0 || thmain->ticks % DTQ == 0){
     swtch(&p->context, mycpu()->scheduler);
   } else {
     if(p != nxt){
-    // TODO: Fix vswitch panic bug
-      //vswitchuvm(thnext);
-      switchuvm(nxt);
+      vswitchuvm(nxt);
       mycpu()->proc = nxt;
       nxt->state = RUNNING;
       swtch(&p->context, nxt->context);
