@@ -1,5 +1,5 @@
 #define DTQ      5
-#define TQ(l)    (l==0 ? 5 : 10*l)
+#define TQ(l)    ((l)==0 ? 5 : 10*(l))
 #define TA(l)    (4*TQ(l))
 #define LARGENUM 1000
 #define MAXINT   0x7fffffff
