@@ -55,6 +55,13 @@ list_add_tail(struct list_head *new,
 }
 
 static inline void
+list_add_after(struct list_head *new,
+               struct list_head *node)
+{
+  __list_add(new, node, node->next);
+}
+
+static inline void
 __list_del(struct list_head *prev,
            struct list_head *next)
 {

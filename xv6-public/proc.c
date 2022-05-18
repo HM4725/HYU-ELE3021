@@ -18,9 +18,10 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void pushheap(struct proc*);
-static void enqueue_proc(struct proc*, int);
+static void enqueue_proc(struct proc*);
 static void dequeue_proc(struct proc*);
 static int getminpass(void);
+struct proc* ready_proc(struct proc*);
 
 // set_cpu_share is used in sys_set_cpu_share
 int
@@ -101,23 +102,109 @@ popheap()
   return min;
 }
 
+static struct proc*
+__routine_is_pinned(struct proc *th, void *pin){
+  return &th->mlfq == (struct list_head*)pin ? th : 0;
+}
+static int
+is_proc_pinned(struct proc *p, struct list_head* pin)
+{
+  struct proc* th;
+  th = threads_apply1(p, __routine_is_pinned, pin);
+  return th != 0 ? 1 : 0;
+}
+// self: 1 -> include itself, 0-> not include
+static void
+pin_next_thread(struct proc *th, int self){
+  struct proc *nxt;
+  struct list_head **ppin;
+  int level;
+
+  level = main_thread(th)->privlevel;
+  ppin = &ptable.mlfq.pin[level];
+  if(is_proc_pinned(th, *ppin)){
+    nxt = ready_thread(th);
+    if(nxt != 0 && (self || nxt != th)){
+      *ppin = &nxt->mlfq;
+    } else {
+      nxt = ready_or_running_thread(th);
+      if(nxt == 0)
+        panic("pin next thread");
+      nxt = ready_proc(nxt);
+      *ppin = nxt != 0 ? &nxt->mlfq : &ptable.mlfq.queue[level];
+    }
+  }
+}
+static void
+pin_next_proc(struct proc *p, int self){
+  struct proc *nxt;
+  struct list_head **ppin;
+  int level;
+
+  level = main_thread(p)->privlevel;
+  ppin = &ptable.mlfq.pin[level];
+  if(is_proc_pinned(p, *ppin)){
+    nxt = ready_or_running_thread(p);
+    if(nxt == 0)
+      panic("pin next proc");
+    nxt = ready_proc(nxt);
+    if(nxt != 0){
+      *ppin = &nxt->mlfq;
+    } else {
+      if(self){
+        nxt = ready_thread(p);
+        *ppin = nxt != 0 ? &nxt->mlfq : &ptable.mlfq.queue[level];
+      } else {
+        *ppin = &ptable.mlfq.queue[level];
+      }
+    }
+  }
+}
 // enqueue pushes proc to MLFQ.
 // In MLFQ, proc states are as following:
 //   RUNNING, RUNNABLE
-struct proc*
-enqueue_thread(struct proc* th, void *level)
+void
+enqueue_thread(struct proc* th)
 {
-  struct list_head *queue;
-  queue = &ptable.mlfq.queue[(int)level];
-  if(th->state == RUNNABLE || th->state == RUNNING){
-    list_add_tail(&th->mlfq, queue);
-  }
+  struct proc *pivot;
+  struct list_head *q;
+  int level;
+
+  if(th->state != RUNNABLE)
+    panic("enqueue unready thread");
+
+  pivot = ready_or_running_thread(th);
+  if(th == pivot){ // no proc of the thread in queue
+    level = main_thread(th)->privlevel;
+    q = &ptable.mlfq.queue[level];
+    list_add_tail(&th->mlfq, q);
+  } else
+    list_add_after(&th->mlfq, &pivot->mlfq);
+}
+
+static struct proc*
+__enqueue_remain(struct proc *th, void *p)
+{
+  struct proc *pivot = (struct proc *)p;
+  if(th != pivot && (th->state == RUNNABLE || th->state == RUNNING))
+    list_add_after(&th->mlfq, &pivot->mlfq);
   return 0;
 }
+
 static void
-enqueue_proc(struct proc *p, int level)
+enqueue_proc(struct proc *p)
 {
-  threads_apply1(p, enqueue_thread, (void*)level);
+  struct list_head *q;
+  int level;
+
+  if(p->state != RUNNABLE)
+    panic("enqueue unready process");
+
+  level = main_thread(p)->privlevel;
+  q = &ptable.mlfq.queue[level];
+
+  list_add_tail(&p->mlfq, q);
+  threads_apply1(p, __enqueue_remain, p);
 }
 
 // concatqueue is used in MLFQ queues.
@@ -141,29 +228,27 @@ concatqueue(int src, int dst)
 // dequeue pops proc from MLFQ.
 // In MLFQ, proc states are as following:
 //   RUNNING, RUNNABLE
-struct proc*
+void
 dequeue_thread(struct proc *th)
 {
-  struct list_head **ppin;
-  struct list_head *mlfq;
-  int level;
+  pin_next_thread(th, 0);
+  list_del(&th->mlfq);
+}
 
-  if(th->state == RUNNABLE || th->state == RUNNING){
-    level = th->thmain->privlevel;
-    ppin = &ptable.mlfq.pin[level];
-    mlfq = &th->mlfq;
-    if(*ppin == mlfq)
-      *ppin = mlfq->next;
-    list_del(mlfq);
-  }
+struct proc*
+__routine_dequeue_thread(struct proc *th)
+{
+  if(th->state == RUNNABLE || th->state == RUNNING)
+    list_del(&th->mlfq);
   return 0;
 }
+
 static void
 dequeue_proc(struct proc *p)
 {
-  threads_apply0(p, dequeue_thread); 
+  pin_next_proc(p, 0);
+  threads_apply0(p, __routine_dequeue_thread);
 }
-
 void
 pinit(void)
 {
@@ -294,6 +379,8 @@ userinit(void)
     panic("userinit: out of memory?");
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
   p->sz = PGSIZE;
+  p->type = MLFQ;
+  p->privlevel = 0;
   list_head_init(&p->thgroup);
   p->thmain = p;
   memset(p->tf, 0, sizeof(*p->tf));
@@ -315,7 +402,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
-  enqueue_proc(p, p->privlevel);
+  enqueue_proc(p);
 
   release(&ptable.lock);
 }
@@ -375,6 +462,8 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   list_add_tail(&np->sibling, &curproc->children);
+  np->type = MLFQ;
+  np->privlevel = 0;
   np->thmain = np;
   list_head_init(&np->thgroup);
 
@@ -396,7 +485,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
-  enqueue_proc(np, np->thmain->privlevel);
+  enqueue_proc(np);
 
   release(&ptable.lock);
 
@@ -511,11 +600,15 @@ wait(void)
 }
 
 struct proc*
-next_proc(struct proc *p)
+ready_proc(struct proc *p)
 {
   struct proc *np;
-  struct list_head *q, *start, *itr;
-  int level = p->thmain->privlevel;
+  struct list_head *q;
+  struct list_head *start, *itr;
+  int level = main_thread(p)->privlevel;
+
+  if(p->state != RUNNABLE && p->state != RUNNING)
+    panic("ready_proc");
 
   q = &ptable.mlfq.queue[level];
   start = &p->mlfq;
@@ -531,7 +624,7 @@ next_proc(struct proc *p)
 
 struct proc*
 mlfqselect(){
-  struct proc *p, *np;
+  struct proc *p;
   struct list_head *q;
   struct list_head **ppin;
   int l;
@@ -545,8 +638,9 @@ mlfqselect(){
       } else {
         p = list_entry(*ppin, struct proc, mlfq);
       }
-      np = next_proc(p);
-      *ppin = np != 0 ? &np->mlfq : q;
+      if(main_thread(p)->privlevel != l)
+        panic("mlfqselect");
+      *ppin = &p->mlfq;
       return p;
     }
   }
@@ -554,14 +648,36 @@ mlfqselect(){
   return 0;
 }
 
-void
-mlfqlogic(struct proc *p){
-  struct proc *np;
-  struct proc *thmain = p->thmain;
-  struct list_head **ppin;
+static void
+priority_boost(){
+  struct proc *p;
   struct list_head *q;
   struct list_head *itr;
-  struct proc *pitr;
+  int l, baselevel = QSIZE-1;
+  // RUNNABLE, RUNNING
+  for(l = 1; l <= baselevel; l++){
+    q = &ptable.mlfq.queue[l];
+    for(itr = q->next; itr != q; itr = itr->next){
+      p = list_entry(itr, struct proc, mlfq);
+      p->privlevel = 0;
+      p->ticks = 0;
+    }
+    concatqueue(l, 0);
+  }
+  // SLEEPING
+  q = &ptable.sleep;
+  for(itr = q->next; itr != q; itr = itr->next){
+    p = list_entry(itr, struct proc, sleep);
+    p->privlevel = 0;
+    p->ticks = 0;
+  }
+  ptable.mlfq.ticks = 0;
+}
+
+void
+mlfqlogic(struct proc *p){
+  struct proc *th;
+  struct proc *thmain = main_thread(p);
   int l, baselevel = QSIZE-1;
 
   l = thmain->privlevel;
@@ -569,35 +685,17 @@ mlfqlogic(struct proc *p){
     dequeue_proc(p);
     thmain->privlevel = l+1;
     thmain->ticks = 0;
-    enqueue_proc(p, l+1);
+    th = ready_or_running_thread(p);
+    if(th != 0)
+      enqueue_proc(th);
+  } else if(thmain->ticks % TQ(l) == 0){
+    pin_next_proc(p, 1);
   } else {
-    ppin = &ptable.mlfq.pin[l];
-    q = &ptable.mlfq.queue[l];
-    if(*ppin == q){
-      np = next_thread(p);
-      *ppin = np != 0 ? &np->mlfq : &ptable.mlfq.queue[l];
-    }
+    pin_next_thread(p, 1);
   }
   // Priority boost
   if(ptable.mlfq.ticks >= BOOSTINTERVAL){
-    // RUNNABLE, RUNNING
-    for(l = 1; l <= baselevel; l++){
-      q = &ptable.mlfq.queue[l];
-      for(itr = q->next; itr != q; itr = itr->next){
-        pitr = list_entry(itr, struct proc, mlfq);
-        pitr->privlevel = 0;
-        pitr->ticks = 0;
-      }
-      concatqueue(l, 0);
-    }
-    // SLEEPING
-    q = &ptable.sleep;
-    for(itr = q->next; itr != q; itr = itr->next){
-      pitr = list_entry(itr, struct proc, sleep);
-      pitr->privlevel = 0;
-      pitr->ticks = 0;
-    }
-    ptable.mlfq.ticks = 0;
+    priority_boost();
   }
 }
 
@@ -695,10 +793,10 @@ scheduler(void)
 void
 sched(void)
 {
-  int intena;
+  int intena, tq;
   struct proc *p = myproc();
-  struct proc *thmain = p->thmain;
-  struct proc *thnext = next_thread(p);
+  struct proc *thmain = main_thread(p);
+  struct proc *nxt = ready_thread(p);
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
@@ -711,18 +809,22 @@ sched(void)
   intena = mycpu()->intena;
 
   thmain->ticks++;
-  if(thmain->type == MLFQ)
+  if(thmain->type == MLFQ){
     ptable.mlfq.ticks++;
-  if(thnext == 0 || thmain->ticks % DTQ == 0){
+    tq = TQ(thmain->privlevel);
+  } else {
+    tq = DTQ;
+  }
+  if(nxt == 0 || thmain->ticks % tq == 0){
     swtch(&p->context, mycpu()->scheduler);
   } else {
-    if(p != thnext){
+    if(p != nxt){
     // TODO: Fix vswitch panic bug
       //vswitchuvm(thnext);
-      switchuvm(thnext);
-      mycpu()->proc = thnext;
-      thnext->state = RUNNING;
-      swtch(&p->context, thnext->context);
+      switchuvm(nxt);
+      mycpu()->proc = nxt;
+      nxt->state = RUNNING;
+      swtch(&p->context, nxt->context);
     } else {
       p->state = RUNNING;
     }
@@ -830,7 +932,7 @@ wakeup1(void *chan)
       list_del(&p->sleep);
       p->state = RUNNABLE;
       if(p->type == MLFQ)
-        enqueue_thread(p, (void*)p->thmain->privlevel);
+        enqueue_thread(p);
     }
   }
 }
@@ -861,7 +963,7 @@ kill(int pid)
         list_del(&p->sleep);
         p->state = RUNNABLE;
         if(p->type == MLFQ)
-          enqueue_thread(p, (void*)p->thmain->privlevel);
+          enqueue_thread(p);
       }
       release(&ptable.lock);
       return 0;

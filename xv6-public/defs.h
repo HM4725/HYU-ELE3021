@@ -122,8 +122,8 @@ void            wakeup1(void*);
 void            wakeup(void*);
 void            yield(void);
 int             set_cpu_share(int);
-struct proc*    enqueue_thread(struct proc*, void *);
-struct proc*    dequeue_thread(struct proc*);
+void            enqueue_thread(struct proc*);
+void            dequeue_thread(struct proc*);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -165,7 +165,9 @@ typedef struct proc* (*callback0)(struct proc*);
 typedef struct proc* (*callback1)(struct proc*, void*);
 struct proc*    threads_apply0(struct proc*, callback0);
 struct proc*    threads_apply1(struct proc*, callback1, void*);
-struct proc*    next_thread(struct proc*);
+struct proc*    main_thread(struct proc*);
+struct proc*    ready_thread(struct proc*);
+struct proc*    ready_or_running_thread(struct proc*);
 int             thread_create(thread_t*, thread_routine, void*);
 void            thread_exit(void*);
 int             thread_join(thread_t, void **);

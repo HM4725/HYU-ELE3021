@@ -62,20 +62,40 @@ static struct proc*
 __get_thread(thread_t thread)
 {
   return threads_apply1(myproc(),
-                       __routine_get_thread,
-                       (void*)thread);
+                        __routine_get_thread,
+                        (void*)thread);
 }
 
 struct proc*
-__routine_select_next(struct proc* th)
+main_thread(struct proc *th)
+{
+  while(th != th->thmain)
+    th = th->thmain;
+  return th;
+}
+
+struct proc*
+__routine_is_ready(struct proc* th)
 {
   return th->state == RUNNABLE ? th : 0;
 }
 
 struct proc*
-next_thread(struct proc *th)
+ready_thread(struct proc *th)
 {
-  return threads_apply0(th, __routine_select_next); 
+  return threads_apply0(th, __routine_is_ready);
+}
+
+struct proc*
+__routine_is_ready_or_running(struct proc* th)
+{
+  return th->state == RUNNABLE || th->state == RUNNING ? th : 0;
+}
+
+struct proc*
+ready_or_running_thread(struct proc *th)
+{
+  return threads_apply0(th, __routine_is_ready_or_running);
 }
 
 int
@@ -87,7 +107,7 @@ thread_create(thread_t *thread,
   uint sp;
   struct proc *nth;
   struct proc *curth = myproc();
-  struct proc *thmain = curth->thmain;
+  struct proc *thmain = main_thread(curth);
   struct proc *thlast = list_last_entry(&thmain->thgroup,
                                         struct proc,
                                         thgroup);
@@ -124,7 +144,7 @@ thread_create(thread_t *thread,
 
   // Set thread
   nth->tid = thlast->tid + 1;
-  nth->thmain = thmain;
+  nth->thmain = curth;
   list_add_tail(&nth->thgroup, &thmain->thgroup);
   *thread = nth->tid;
 
@@ -148,7 +168,7 @@ thread_create(thread_t *thread,
 
   nth->state = RUNNABLE;
   if(nth->type == MLFQ)
-    enqueue_thread(nth, (void*)thmain->privlevel);
+    enqueue_thread(nth);
 
   release(&ptable.lock);
 
