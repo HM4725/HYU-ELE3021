@@ -747,7 +747,6 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  int pid = 0;
 
   c->proc = 0;
 
@@ -766,19 +765,15 @@ scheduler(void)
         list_add(&p->run, &ptable.stride.run);
 
       c->proc = p;
-      if(p->pid != pid)
-        switchuvm(p);
-      else
-        vswitchuvm(p);
+      switchuvm(p);
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
-      // switchkvm();  same mapping - redundant?
+      switchkvm();
 
       if(p->type == MLFQ){
         mlfqlogic(c->proc);
       }
-      pid = p->pid;
       c->proc = 0;
     }
 
