@@ -123,7 +123,7 @@ sys_thread_create(void)
   if(argint(0, &thread) < 0 || argint(1, &start_routine) < 0 ||
      argint(2, &arg) < 0) return -1;
   return thread_create((thread_t*)thread,
-                       (thread_routine)start_routine,
+                       (void*(*)(void*))start_routine,
                        (void*)arg);
 }
 

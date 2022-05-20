@@ -168,7 +168,7 @@ struct proc*    threads_apply1(struct proc*, callback1, void*);
 struct proc*    main_thread(struct proc*);
 struct proc*    ready_thread(struct proc*);
 struct proc*    ready_or_running_thread(struct proc*);
-int             thread_create(thread_t*, thread_routine, void*);
+int             thread_create(thread_t*, void*(*)(void*), void*);
 void            thread_exit(void*);
 int             thread_join(thread_t, void **);
 
