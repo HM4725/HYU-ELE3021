@@ -19,7 +19,7 @@ int
 fetchint(uint addr, int *ip)
 {
   struct proc *curproc = myproc();
-  uint base1 = 0, bound1 = curproc->thmain->sz;
+  uint base1 = 0, bound1 = main_thread(curproc)->sz;
   uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
 
   if((addr >= base1 && addr+4 <= bound1) ||
@@ -38,7 +38,7 @@ fetchstr(uint addr, char **pp)
 {
   char *s, *ep;
   struct proc *curproc = myproc();
-  uint base1 = 0, bound1 = curproc->thmain->sz;
+  uint base1 = 0, bound1 = main_thread(curproc)->sz;
   uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
 
   if(addr >= base1 && addr < bound1){
@@ -74,7 +74,7 @@ argptr(int n, char **pp, int size)
 {
   int i;
   struct proc *curproc = myproc();
-  uint base1 = 0, bound1 = curproc->thmain->sz;
+  uint base1 = 0, bound1 = main_thread(curproc)->sz;
   uint base2 = curproc->ustack, bound2 = curproc->ustack + USTACKSIZE;
  
   if(argint(n, &i) < 0)

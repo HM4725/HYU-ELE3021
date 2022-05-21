@@ -414,9 +414,10 @@ growproc(int n)
 {
   uint sz;
   struct proc *curproc = myproc();
+  struct proc *thmain = main_thread(curproc);
 
   acquire(&ptable.lock);
-  sz = curproc->thmain->sz;
+  sz = thmain->sz;
   if(n > 0){
     if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0){
       release(&ptable.lock);
@@ -428,7 +429,7 @@ growproc(int n)
       return -1;
     }
   }
-  curproc->thmain->sz = sz;
+  thmain->sz = sz;
   invalidate_tlb(curproc);
   release(&ptable.lock);
   return 0;
