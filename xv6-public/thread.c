@@ -158,18 +158,18 @@ thread_create(thread_t *thread,
   for(i = 0; i < NOFILE; i++)
     if(thmain->ofile[i])
       nth->ofile[i] = thmain->ofile[i];
-      //nth->ofile[i] = filedup(thmain->ofile[i]);
-  //nth->cwd = idup(thmain->cwd);
   nth->cwd = thmain->cwd;
 
   safestrcpy(nth->name, thmain->name, sizeof(thmain->name));
+
 
   acquire(&ptable.lock);
 
   nth->state = RUNNABLE;
   if(nth->type == MLFQ)
     enqueue_thread(nth);
-  switchuvm(curth);
+  invalidate_tlb(curth);
+
   release(&ptable.lock);
 
   return 0;

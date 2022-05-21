@@ -153,6 +153,19 @@ switchkvm(void)
   lcr3(V2P(kpgdir));   // switch to the kernel page table
 }
 
+// When xv6 changes the page tables, it must invalidate
+// the cache entries. If it doesn't invalidate the cache
+// entries, then at some point later the TLB might use
+// an old mapping, pointing to a physical page that in the
+// mean time has been allocated to another process.
+void
+invalidate_tlb(struct proc *p)
+{
+  pushcli();
+  lcr3(V2P(p->pgdir));
+  popcli();
+}
+
 // Switch TSS and h/w page table to correspond to process p.
 void
 switchuvm(struct proc *p)
