@@ -429,7 +429,7 @@ growproc(int n)
     }
   }
   curproc->thmain->sz = sz;
-  switchuvm(curproc);
+  invalidate_tlb(curproc);
   release(&ptable.lock);
   return 0;
 }
