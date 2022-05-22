@@ -238,8 +238,7 @@ thread_join(thread_t thread, void **retval)
   acquire(&ptable.lock);
   for(;;){
     curth = myproc();
-    if((th = __get_thread(thread)) == 0){
-      cprintf("%d\n", th->tid);
+    if((th = __get_thread(thread)) == 0 || curth->killed){
       release(&ptable.lock);
       return -1;
     }
@@ -253,4 +252,70 @@ thread_join(thread_t thread, void **retval)
     }
     sleep(curth, &ptable.lock);
   }
+}
+
+struct proc*
+__routine_kill_thread(struct proc* th)
+{
+  th->killed = 1;
+  return 0;
+}
+
+void
+terminate_proc(struct proc* p){
+  threads_apply0(p, __routine_kill_thread);
+}
+
+struct proc*
+__routine_usurp_proc(struct proc *th, void *main)
+{
+  th->thmain = (struct proc*)main;
+  return 0;
+}
+
+// usurp_main doesn't guarantee the order of threads.
+// If it is called, the other threads have to be
+// terminated.
+static void
+__usurp_proc(struct proc *th)
+{
+  int i;
+  struct proc *thmain = main_thread(th);
+
+  th->sz = thmain->sz;
+  th->ticks = thmain->ticks;
+  for(i = 0; i < NOFILE; i++)
+    if(thmain->ofile[i])
+      th->ofile[i] = thmain->ofile[i];
+  th->cwd = thmain->cwd;
+  if(th->type == STRIDE){
+    th->tickets = thmain->tickets;
+    th->pass = thmain->pass;
+  }
+  threads_apply1(th, __routine_usurp_proc, th);
+  thmain->tid = th->tid;
+  th->tid = 0;
+}
+
+int
+monopolize_proc(struct proc *p)
+{
+  struct proc *th;
+  int null = 0;
+
+  acquire(&ptable.lock);
+  wakeup1(p->thmain);
+  if(p != p->thmain)
+    __usurp_proc(p);
+  terminate_proc(p);
+  p->killed = 0;
+  release(&ptable.lock);
+
+  while(!list_empty(&p->thgroup)){
+    th = list_first_entry(&p->thgroup,
+                          struct proc, thgroup);
+    if(thread_join(th->tid, (void**)&null) < 0)
+      return -1;
+  }
+  return 0;
 }

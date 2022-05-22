@@ -629,12 +629,6 @@ fork(void)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
-struct proc*
-__routine_kill(struct proc *th)
-{
-  th->killed = 1;
-  return 0;
-}
 void
 exit(void)
 {
@@ -648,8 +642,9 @@ exit(void)
 
   // Terminate threads
   if(curproc->killed == 0)
-    threads_apply0(curproc, __routine_kill);
+    terminate_proc(curproc);
   if(curproc->tid == 0){
+    curproc->killed = 0;
     while(!list_empty(&curproc->thgroup)){
       th = list_first_entry(&curproc->thgroup,
                             struct proc, thgroup);
@@ -1108,7 +1103,7 @@ kill(int pid)
   acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
-      threads_apply0(p, __routine_kill);
+      terminate_proc(p);
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING){
         list_del(&p->sleep);
