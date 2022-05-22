@@ -187,14 +187,25 @@ thread_create(thread_t *thread,
   return 0;
 }
 
+struct proc*
+__handle_orphan_thread(struct proc* th, void* main)
+{
+  struct proc *thmain = (struct proc*)main;
+  if(th->thmain == thmain)
+    th->thmain = main_thread(thmain);
+  return 0;
+}
+
 void
 thread_exit(void *retval)
 {
   struct proc *curth = myproc();
   int fd;
 
-  if(curth == curth->thmain)
+  if(curth == curth->thmain){
+    kprintf_warn("exit fail! pid: %d (main)\n", curth->pid);
     return;
+  }
   for(fd = 0; fd < NOFILE; fd++)
     curth->ofile[fd] = 0;
   curth->cwd = 0;
@@ -203,6 +214,8 @@ thread_exit(void *retval)
 
   curth->retval = retval;
   wakeup1(curth->thmain);
+
+  threads_apply1(curth, __handle_orphan_thread, curth);
 
   if(curth->type == MLFQ)
     dequeue_thread(curth);
