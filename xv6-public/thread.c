@@ -266,7 +266,6 @@ thread_create(thread_t *thread,
               void *(*start_routine)(void *),
               void *arg)
 {
-  int i;
   uint sp;
   struct proc *nth;
   struct proc *curth = myproc();
@@ -283,11 +282,9 @@ thread_create(thread_t *thread,
   // Copy process state from proc.
   nth->pid = thmain->pid;
   nth->pgdir = thmain->pgdir;
-  nth->sz = thmain->sz;
   nth->parent = thmain->parent;
   list_add_tail(&nth->sibling, &thmain->parent->children);
   nth->type = thmain->type;
-  nth->privlevel = thmain->privlevel;
 
   // Set user stack
   sp = PGROUNDDOWN(thlast->ustack) - PGSIZE;
@@ -316,12 +313,6 @@ thread_create(thread_t *thread,
   nth->tf->eax = 0;
   nth->tf->esp = sp;
   nth->tf->eip = (uint)start_routine;
-
-  // Set files
-  for(i = 0; i < NOFILE; i++)
-    if(thmain->ofile[i])
-      nth->ofile[i] = thmain->ofile[i];
-  nth->cwd = thmain->cwd;
 
   safestrcpy(nth->name, thmain->name, sizeof(thmain->name));
 
