@@ -13,9 +13,35 @@
 
 extern struct ptable ptable;
 
+/* Type: callback0
+ * ------------------------
+ * @group      Thread
+ * @type       struct proc* (*)(struct proc*)
+ * @brief      Function pointer type which has no argument.
+ * @note       This type is used at thread_apply0
+ */
 typedef struct proc* (*callback0)(struct proc*);
+/* Type: callback1
+ * ------------------------
+ * @group      Thread
+ * @type       struct proc* (*)(struct proc*)
+ * @brief      Function pointer type which has 1 argument.
+ * @note       This type is used at thread_apply1
+ */
 typedef struct proc* (*callback1)(struct proc*, void*);
 
+/* Function: threads_apply0
+ * ------------------------
+ * @group      Thread
+ * @brief      Apply routine to all threads in the process.
+ * @note1      Apply routine from the next thread of p to p.
+ * @note2      If a routine returns non-zero value,
+ *             then it stops and returns the value.
+ * @param[in]  p: entry thread to apply routine.
+ * @param[in]  routine: zero-argument routine to apply to threads.
+ * @return     If a routine returns non-zero value, it returns it.
+ *             Otherwise it returns 0.
+ */
 struct proc*
 threads_apply0(struct proc* p,
               callback0 routine)
@@ -34,6 +60,19 @@ threads_apply0(struct proc* p,
   return 0;
 }
 
+/* Function: threads_apply1
+ * ------------------------
+ * @group      Thread
+ * @brief      Apply routine to all threads in the process.
+ * @note1      Apply routine from the next thread of p to p.
+ * @note2      If a routine returns non-zero value,
+ *             then it stops and returns the value.
+ * @param[in]  p: entry thread to apply routine.
+ * @param[in]  routine: 1-argument routine to apply to threads.
+ * @param[in]  arg: argument of routine.
+ * @return     If a routine returns non-zero value, it returns it.
+ *             Otherwise it returns 0.
+ */
 struct proc*
 threads_apply1(struct proc* p,
               callback1 routine,
@@ -210,7 +249,18 @@ monopolize_proc(struct proc *p)
   return 0;
 }
 
-/////
+/* Function: thread_create
+ * ------------------------
+ * @group      Thread
+ * @brief      Create a thread
+ * @note       The thread shares the memory space in the process.
+ * @param[out] thread: thread identifier
+ * @param[in]  start_routine: new thread starts from start_routine
+ * @param[in]  arg: argument of start_routine
+ *                  To pass multiple arguments,
+ *                  send a pointer to a structure
+ * @return     On success 0 and on error -1
+ */
 int
 thread_create(thread_t *thread,
               void *(*start_routine)(void *),
@@ -287,6 +337,14 @@ thread_create(thread_t *thread,
   return 0;
 }
 
+/* Function: thread_exit
+ * ------------------------
+ * @group      Thread
+ * @brief      Terminate the thread
+ * @note       Evenif a thread didn't call this function,
+ *             it's ok. OS calls this function implicitly.
+ * @param[in]  retval: retval is sent to the joining thread
+ */
 void
 thread_exit(void *retval)
 {
@@ -315,6 +373,17 @@ thread_exit(void *retval)
   panic("zombie thread exit");
 }
 
+/* Function: thread_join
+ * ------------------------
+ * @group      Thread
+ * @brief      Wait for a thread which exited.
+ * @note       Evenif a thread didn't call this function,
+ *             it's ok. OS calls this function implicitly.
+ * @param[in]  thread: identifier of the thread which
+                       current thread is waiting for.
+ * @param[out] retval: the pointer for a return value
+ *                     which exited thread sent.
+ */
 int
 thread_join(thread_t thread, void **retval)
 {
@@ -339,5 +408,3 @@ thread_join(thread_t thread, void **retval)
     sleep(curth, &ptable.lock);
   }
 }
-
-

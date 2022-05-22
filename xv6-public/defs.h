@@ -169,11 +169,11 @@ struct proc*    main_thread(struct proc*);
 struct proc*    ready_thread(struct proc*);
 struct proc*    sleeping_thread(struct proc*);
 struct proc*    ready_or_running_thread(struct proc*);
+void            terminate_proc(struct proc*);
+int             monopolize_proc(struct proc*);
 int             thread_create(thread_t*, void*(*)(void*), void*);
 void            thread_exit(void*);
 int             thread_join(thread_t, void **);
-void            terminate_proc(struct proc*);
-int             monopolize_proc(struct proc*);
 
 // timer.c
 void            timerinit(void);

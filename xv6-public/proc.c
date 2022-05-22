@@ -21,15 +21,74 @@ static void pushheap(struct proc*);
 static void enqueue_proc(struct proc*);
 static void dequeue_proc(struct proc*);
 static int getminpass(void);
-struct proc* ready_proc(struct proc*);
 
-// set_cpu_share is used in sys_set_cpu_share
-struct proc*
+// [Thread routines]
+static struct proc*
 __routine_set_stride(struct proc *th)
 {
   th->type = STRIDE;
   return 0;
 }
+
+static struct proc*
+__routine_is_pinned(struct proc *th, void *pin)
+{
+  return &th->mlfq == (struct list_head*)pin ? th : 0;
+}
+
+static struct proc*
+__routine_enqueue_remain(struct proc *th, void *p)
+{
+  struct proc *pivot = (struct proc *)p;
+  if(th != pivot && (th->state == RUNNABLE || th->state == RUNNING))
+    list_add_after(&th->mlfq, &pivot->mlfq);
+  return 0;
+}
+
+static struct proc*
+__routine_dequeue_proc(struct proc *th)
+{
+  if(th->state == RUNNABLE || th->state == RUNNING)
+    list_del(&th->mlfq);
+  return 0;
+}
+
+static struct proc*
+ready_proc(struct proc *p)
+{
+  struct proc *np;
+  struct list_head *q;
+  struct list_head *start, *itr;
+  int level = main_thread(p)->privlevel;
+
+  if(p->state != RUNNABLE && p->state != RUNNING)
+    panic("ready_proc");
+
+  q = &ptable.mlfq.queue[level];
+  start = &p->mlfq;
+  for(itr = start->next; itr != start; itr = itr->next){
+    if(!list_is_head(itr, q)){
+      np = list_entry(itr, struct proc, mlfq);
+      if(np->pid != p->pid && np->state == RUNNABLE)
+        return np;
+    }
+  }
+  return 0;
+}
+
+/* Function: set_cpu_share
+ * ------------------------
+ * @group      Stride
+ * @brief      Guarantee the fair share of cpu time to process
+ *             according to the stride scheduling algorithm.
+ * @note1      If the type of the current process was MLFQ,
+ *             it changes the type to STRIDE.
+ *             Otherwise if the type was STRIDE, then it just
+ *             modifies the tickets of process.
+ * @note2      The main thread manages pass and tickets.
+ * @param[in]  share: the share of cpu time (unit: %)
+ * @return     If it successes then 0 else -1
+ */
 int
 set_cpu_share(int share)
 {
@@ -66,8 +125,14 @@ set_cpu_share(int share)
   }
 }
 
-// getminpass is a function which returns
-// the minimum pass value of stride heap.
+/* Function: getminpass
+ * ------------------------
+ * @group      Stride
+ * @brief      Get a minimum pass value of the stride heap.
+ * @note       If there isn't any process in the stride heap,
+ *             it returns a maximum value.
+ * @return     Minimum pass value of the stride heap
+ */
 static int
 getminpass(void)
 {
@@ -75,9 +140,15 @@ getminpass(void)
     main_thread(ptable.stride.minheap[1])->pass : MAXINT;
 }
 
-// pushheap is used for the stride scheduler.
-// This heap is a min-heap for the pass of process.
-// RUNNABLE, SLEEPING states are managed in it.
+/* Function: pushheap
+ * ------------------------
+ * @group      Stride
+ * @brief      Push a stride type process.
+ * @note1      In stride heap, thread states are as following:
+ *             RUNNABLE, SLEEPING
+ * @note2      In a process, only one thread has to be in the heap.
+ * @param[in]  p: stride type process
+ */
 static void
 pushheap(struct proc *p)
 {
@@ -92,7 +163,14 @@ pushheap(struct proc *p)
   minheap[i] = p;
 }
 
-// pushheap is used for the stride scheduler.
+/* Function: popheap
+ * ------------------------
+ * @group      Stride
+ * @brief      Pop a process which has a minimum pass value
+ *             from the stride minheap
+ * @note       When it is called, the size of heap must be more than 1
+ * @return     Stride type process which has a minimum pass
+ */
 static struct proc*
 popheap()
 {
@@ -115,10 +193,14 @@ popheap()
   return min;
 }
 
-static struct proc*
-__routine_is_pinned(struct proc *th, void *pin){
-  return &th->mlfq == (struct list_head*)pin ? th : 0;
-}
+/* Function: is_proc_pinned
+ * ------------------------
+ * @group      MLFQ
+ * @brief      Check whether the process is pinned.
+ * @param[in]  p: process
+ * @param[in]  pin: pin
+ * @return     If p is pinned then 1 else 0
+ */
 static int
 is_proc_pinned(struct proc *p, struct list_head* pin)
 {
@@ -126,7 +208,15 @@ is_proc_pinned(struct proc *p, struct list_head* pin)
   th = threads_apply1(p, __routine_is_pinned, pin);
   return th != 0 ? 1 : 0;
 }
-// self: 1 -> include itself, 0-> not include
+
+/* Function: pin_next_thread
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Pin on next thread in MLFQ
+ * @param[in]  th: current thread
+ * @param[in]  self: if 1, include current thread
+ *                   else (0), exclude current thread
+ */
 static void
 pin_next_thread(struct proc *th, int self){
   struct proc *nxt;
@@ -148,6 +238,15 @@ pin_next_thread(struct proc *th, int self){
     }
   }
 }
+
+/* Function: pin_next_proc
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Pin on next process in MLFQ.
+ * @param[in]  p: current process
+ * @param[in]  self: if 1, include current process
+ *                   else (0), exclude current process
+ */
 static void
 pin_next_proc(struct proc *p, int self){
   struct proc *nxt;
@@ -173,9 +272,17 @@ pin_next_proc(struct proc *p, int self){
     }
   }
 }
-// enqueue pushes proc to MLFQ.
-// In MLFQ, proc states are as following:
-//   RUNNING, RUNNABLE
+
+/* Function: enqueue_thread
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Enqueue a thread to MLFQ
+ * @note1      In MLFQ, thread states are as following:
+ *             RUNNING, RUNNABLE
+ * @note2      It guarantees gathering of threads of a process.
+ *             ex) [p3t0]-[p1t0]-[p1t2]-[p1t1]-[p2t0]
+ * @param[in]  th: thread to enqueue
+ */
 void
 enqueue_thread(struct proc* th)
 {
@@ -195,15 +302,18 @@ enqueue_thread(struct proc* th)
     list_add_after(&th->mlfq, &pivot->mlfq);
 }
 
-static struct proc*
-__enqueue_remain(struct proc *th, void *p)
-{
-  struct proc *pivot = (struct proc *)p;
-  if(th != pivot && (th->state == RUNNABLE || th->state == RUNNING))
-    list_add_after(&th->mlfq, &pivot->mlfq);
-  return 0;
-}
-
+/* Function: enqueue_proc
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Enqueue all threads of a process to MLFQ
+ * @note1      In MLFQ, thread states are as following:
+ *             RUNNING, RUNNABLE
+ * @note2      Unlike the stride data structure, MLFQ has multiple
+ *             threads of a process.
+ * @note3      It guarantees gathering of threads of a process.
+ *             ex) [p3t0]-[p1t0]-[p1t2]-[p1t1]-[p2t0]
+ * @param[in]  p: process to enqueue
+ */
 static void
 enqueue_proc(struct proc *p)
 {
@@ -217,12 +327,20 @@ enqueue_proc(struct proc *p)
   q = &ptable.mlfq.queue[level];
 
   list_add_tail(&p->mlfq, q);
-  threads_apply1(p, __enqueue_remain, p);
+  threads_apply1(p, __routine_enqueue_remain, p);
 }
 
-// concatqueue is used in MLFQ queues.
-// It is a only way to move the process upward,
-// and called when priority boost.
+/* Function: concatqueue
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Concatenate src queue to dst queue of MLFQ.
+ * @note       It is called when the priority boost occurs.
+ * @param[in]  src: the level of source queue
+ * @param[in]  dst: the level of destination queue
+ * @example    src: 1, dst: 0
+ *             [queue0]     [queue1]     [queue2]
+ *             ->[queue0~queue1]  []     [queue2]
+ */
 static void
 concatqueue(int src, int dst)
 {
@@ -238,9 +356,12 @@ concatqueue(int src, int dst)
   list_bulk_move_tail(srcq, dstq);
 }
 
-// dequeue pops proc from MLFQ.
-// In MLFQ, proc states are as following:
-//   RUNNING, RUNNABLE
+/* Function: dequeue_thread
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Dequeue a thread from MLFQ
+ * @param[in]  th: thread to dequeue
+ */
 void
 dequeue_thread(struct proc *th)
 {
@@ -248,19 +369,17 @@ dequeue_thread(struct proc *th)
   list_del(&th->mlfq);
 }
 
-struct proc*
-__routine_dequeue_thread(struct proc *th)
-{
-  if(th->state == RUNNABLE || th->state == RUNNING)
-    list_del(&th->mlfq);
-  return 0;
-}
-
+/* Function: dequeue_proc
+ * -------------------------
+ * @group      MLFQ
+ * @brief      Dequeue all threads of the process from MLFQ
+ * @param[in]  p: process to dequeue
+ */
 static void
 dequeue_proc(struct proc *p)
 {
   pin_next_proc(p, 0);
-  threads_apply0(p, __routine_dequeue_thread);
+  threads_apply0(p, __routine_dequeue_proc);
 }
 void
 pinit(void)
@@ -451,8 +570,8 @@ growproc(int n)
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
-struct proc*
-search_thmain(struct proc *th1, struct proc *th2)
+static struct proc*
+__search_thmain(struct proc *th1, struct proc *th2)
 {
   struct list_head *end, *ritr1, *ritr2;
 
@@ -466,7 +585,7 @@ search_thmain(struct proc *th1, struct proc *th2)
   return list_entry(ritr2, struct proc, thgroup);
 }
 
-struct proc*
+static struct proc*
 __routine_fork_thread(struct proc *th, void *main){
   int i;
   struct proc *nth;
@@ -499,12 +618,12 @@ __routine_fork_thread(struct proc *th, void *main){
   if(th->thmain->tid == 0)
     nth->thmain = thmain;
   else
-    nth->thmain = search_thmain(th, nth);
+    nth->thmain = __search_thmain(th, nth);
 
   return 0;
 }
 
-struct proc*
+static struct proc*
 __routine_rollback_thread(struct proc *th){
   list_del(&th->thgroup);
   list_del(&th->sibling);
@@ -745,29 +864,6 @@ wait(void)
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
-}
-
-struct proc*
-ready_proc(struct proc *p)
-{
-  struct proc *np;
-  struct list_head *q;
-  struct list_head *start, *itr;
-  int level = main_thread(p)->privlevel;
-
-  if(p->state != RUNNABLE && p->state != RUNNING)
-    panic("ready_proc");
-
-  q = &ptable.mlfq.queue[level];
-  start = &p->mlfq;
-  for(itr = start->next; itr != start; itr = itr->next){
-    if(!list_is_head(itr, q)){
-      np = list_entry(itr, struct proc, mlfq);
-      if(np->pid != p->pid && np->state == RUNNABLE)
-        return np;
-    }
-  }
-  return 0;
 }
 
 struct proc*
