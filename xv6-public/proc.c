@@ -24,10 +24,17 @@ static int getminpass(void);
 struct proc* ready_proc(struct proc*);
 
 // set_cpu_share is used in sys_set_cpu_share
+struct proc*
+__routine_set_stride(struct proc *th)
+{
+  th->type = STRIDE;
+  return 0;
+}
 int
 set_cpu_share(int share)
 {
   struct proc *p;
+  struct proc *thmain;
   int remain;
   int minpass, mlfqpass;
 
@@ -36,20 +43,21 @@ set_cpu_share(int share)
 
   acquire(&ptable.lock);
   p = myproc();
+  thmain = main_thread(p);
   remain = ptable.mlfq.tickets;
   if(p->type == STRIDE)
-    remain += p->tickets;
+    remain += thmain->tickets;
   if(remain - share >= RESERVE){
     if(p->type == MLFQ){
       dequeue_proc(p);
       minpass = getminpass();
       mlfqpass = ptable.mlfq.pass;
-      p->pass = minpass < mlfqpass ? minpass : mlfqpass;
-      p->type = STRIDE;
+      thmain->pass = minpass < mlfqpass ? minpass : mlfqpass;
+      threads_apply0(thmain, __routine_set_stride);
       list_add(&p->run, &ptable.stride.run);
     }
     ptable.mlfq.tickets = remain - share;
-    p->tickets = share;
+    thmain->tickets = share;
     release(&ptable.lock);
     return 0;
   } else {
@@ -64,7 +72,7 @@ static int
 getminpass(void)
 {
   return ptable.stride.size > 0 ?
-    ptable.stride.minheap[1]->pass : MAXINT;
+    main_thread(ptable.stride.minheap[1])->pass : MAXINT;
 }
 
 // pushheap is used for the stride scheduler.
@@ -74,9 +82,10 @@ static void
 pushheap(struct proc *p)
 {
   int i = ++ptable.stride.size;
+  struct proc *thmain = main_thread(p);
   struct proc **minheap = ptable.stride.minheap;
 
-  while(i != 1 && p->pass < minheap[i/2]->pass){
+  while(i != 1 && thmain->pass < main_thread(minheap[i/2])->pass){
     minheap[i] = minheap[i/2];
     i /= 2;
   }
@@ -93,8 +102,12 @@ popheap()
   struct proc *last = minheap[ptable.stride.size--];
 
   for(parent=1, child=2; child <= ptable.stride.size; parent=child, child*=2){
-    if(child < ptable.stride.size && minheap[child]->pass > minheap[child+1]->pass) child++;
-    if(last->pass <= minheap[child]->pass) break;
+    if(child < ptable.stride.size && 
+       main_thread(minheap[child])->pass >
+       main_thread(minheap[child+1])->pass)
+      child++;
+    if(main_thread(last)->pass <= main_thread(minheap[child])->pass)
+      break;
     minheap[parent] = minheap[child];
   }
   minheap[parent] = last;
@@ -438,12 +451,79 @@ growproc(int n)
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
+struct proc*
+search_thmain(struct proc *th1, struct proc *th2)
+{
+  struct list_head *end, *ritr1, *ritr2;
+
+  end = &th1->thmain->thgroup;
+  ritr1 = &th1->thgroup;
+  ritr2 = &th2->thgroup;
+  while(ritr1 != end){
+    ritr1 = ritr1->prev;
+    ritr2 = ritr2->prev;
+  }
+  return list_entry(ritr2, struct proc, thgroup);
+}
+
+struct proc*
+__routine_fork_thread(struct proc *th, void *main){
+  int i;
+  struct proc *nth;
+  struct proc *thmain = (struct proc*)main;
+
+  if(th->tid == 0)
+    return 0;
+
+  if((nth = allocproc()) == 0){
+    return th;
+  }
+
+  nth->pgdir = thmain->pgdir;
+
+  nth->parent = thmain->parent;
+  list_add_tail(&nth->sibling, &nth->parent->children);
+
+  for(i = 0; i < NOFILE; i++)
+    if(thmain->ofile[i])
+      nth->ofile[i] = thmain->ofile[i];
+  nth->cwd = thmain->cwd;
+
+  safestrcpy(nth->name, thmain->name, sizeof(thmain->name));
+
+  nth->pid = thmain->pid;
+  nth->ustack = th->ustack;
+  nth->tid = th->tid;
+
+  list_add_tail(&nth->thgroup, &thmain->thgroup);
+  if(th->thmain->tid == 0)
+    nth->thmain = thmain;
+  else
+    nth->thmain = search_thmain(th, nth);
+
+  return 0;
+}
+
+struct proc*
+__routine_rollback_thread(struct proc *th){
+  list_del(&th->thgroup);
+  list_del(&th->sibling);
+  kfree(th->kstack);
+  th->kstack = 0;
+  th->state = UNUSED;
+  list_add(&th->free, &ptable.free);
+  return 0;
+}
+
 int
 fork(void)
 {
-  int i, pid;
-  struct proc *np;
+  int i, pid, delta;
+  struct proc *np, *nxt;
   struct proc *curproc = myproc();
+  struct proc *curmain = main_thread(curproc);
+  struct proc *th, *nth;
+  struct list_head *start, *itr1, *itr2;
 
   // Allocate process.
   if((np = allocproc()) == 0){
@@ -452,42 +532,94 @@ fork(void)
   np->pid = nextpid++;
 
   // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz,
-                          curproc->ustack)) == 0){
+  // main
+  if((np->pgdir = copyuvm(curmain)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
     list_add(&np->free, &ptable.free);
     return -1;
   }
-  np->ustack = curproc->ustack;
-  np->sz = curproc->sz;
-  np->parent = curproc;
-  list_add_tail(&np->sibling, &curproc->children);
+  for(i = 0; i < NOFILE; i++)
+    if(curmain->ofile[i])
+      np->ofile[i] = filedup(curmain->ofile[i]);
+  np->cwd = idup(curmain->cwd);
+
+  np->sz = curmain->sz;
   np->type = MLFQ;
   np->privlevel = 0;
+  np->tid = 0;
   np->thmain = np;
   list_head_init(&np->thgroup);
+  np->parent = curproc;
+  list_add_tail(&np->sibling, &curproc->children);
+  np->ustack = curmain->ustack;
+  safestrcpy(np->name, curmain->name, sizeof(curmain->name));
 
-  *np->tf = *curproc->tf;
-  // Clear %eax so that fork returns 0 in the child.
-  np->tf->eax = 0;
-
-  for(i = 0; i < NOFILE; i++)
-    if(curproc->ofile[i])
-      np->ofile[i] = filedup(curproc->ofile[i]);
-  np->cwd = idup(curproc->cwd);
-
-  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
-
-  np->type = MLFQ;
-
-  pid = np->pid;
+  // thread
+  if(threads_apply1(curmain, __routine_fork_thread, (void*)np) != 0){
+    for(i = 0; i < NOFILE; i++){
+      if(np->ofile[i]){
+        fileclose(np->ofile[i]);
+        np->ofile[i] = 0;
+      }
+    }
+    begin_op();
+    iput(np->cwd);
+    end_op();
+    np->cwd = 0;
+    threads_apply0(np, __routine_rollback_thread);
+    freevm(np->pgdir);
+  }
 
   acquire(&ptable.lock);
 
-  np->state = RUNNABLE;
-  enqueue_proc(np);
+  // kstack & state
+  start = &curmain->thgroup;
+  itr1 = start;
+  itr2 = &np->thgroup;
+  nxt = 0;
+  do {
+    th = list_entry(itr1, struct proc, thgroup);
+    nth = list_entry(itr2, struct proc, thgroup);
+    if(th == curproc){
+      nxt = nth;
+      *nth->tf = *th->tf;
+      nth->tf->eax = 0;
+      nth->state = RUNNABLE;
+    } else {
+      int ip, *pip;
+      delta = (int)nth->kstack - (int)th->kstack;
+      memmove(nth->kstack, th->kstack, KSTACKSIZE);
+      ip = (int)nth->kstack;
+      for(; ip < (int)nth->kstack + KSTACKSIZE ;ip += 4){
+        pip = (int*)ip;
+        if(*pip > (int)th->kstack && *pip < (int)th->kstack + KSTACKSIZE){
+          *pip += delta;
+          cprintf("%p\n", *pip);
+        }
+      }
+      /*
+      delta = (int)th->context - (int)th->kstack;
+      nth->context = (struct context*)(delta + (int)nth->kstack);
+      delta = (int)th->context->ebp - (int)th->kstack;
+      nth->context->ebp = delta + (uint)nth->kstack;
+      delta = (int)th->tf - (int)th->kstack;
+      nth->tf = (struct trapframe*)(delta + (int)nth->kstack);
+      *((uint*)nth->tf - 1) = (uint)nth->tf;*/
+      nth->state = th->state;
+      if(nth->state == SLEEPING){
+        nth->chan = th->chan == th ? nth : th->chan;
+        list_add(&nth->sleep, &ptable.sleep);
+      }
+    }
+    itr1 = itr1->next;
+    itr2 = itr2->next;
+  } while(itr1 != start);
+
+  pid = np->pid;
+
+  enqueue_proc(nxt);
 
   release(&ptable.lock);
 
@@ -497,15 +629,35 @@ fork(void)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
+struct proc*
+__routine_kill(struct proc *th)
+{
+  th->killed = 1;
+  return 0;
+}
 void
 exit(void)
 {
-  struct proc *p, *curproc = myproc();
+  struct proc *p, *th, *curproc = myproc();
   struct list_head *children, *itr;
   int fd;
+  int null = 0;
 
   if(curproc == initproc)
     panic("init exiting");
+
+  // Terminate threads
+  if(curproc->killed == 0)
+    threads_apply0(curproc, __routine_kill);
+  if(curproc->tid == 0){
+    while(!list_empty(&curproc->thgroup)){
+      th = list_first_entry(&curproc->thgroup,
+                            struct proc, thgroup);
+      thread_join(th->tid, (void**)&null);
+    }
+  } else {
+    thread_exit((void*)null);
+  }
 
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
@@ -541,7 +693,6 @@ exit(void)
     dequeue_proc(curproc);
   } else { // STRIDE
     ptable.mlfq.tickets += curproc->tickets;
-    list_del(&curproc->run);
   }
   curproc->state = ZOMBIE;
   sched();
@@ -706,20 +857,21 @@ stridelogic(struct proc *p){
   struct list_head *q;
   struct list_head *itr;
   struct proc *pitr;
+  struct proc *nxt, *thmain;
   int minpass;
   int i;
 
   // Pass overflow handling
   minpass = p == 0 || p->type == MLFQ ?
-    ptable.mlfq.pass : p->pass;
+    ptable.mlfq.pass : main_thread(p)->pass;
   if(minpass > BARRIER){
     for(i = 1; i <= ptable.stride.size; i++){
-      ptable.stride.minheap[i]->pass -= minpass;
+      main_thread(ptable.stride.minheap[i])->pass -= minpass;
     }
     q = &ptable.stride.run;
     for(itr = q->next; itr != q; itr = itr->next){
       pitr = list_entry(itr, struct proc, run);
-      pitr->pass -= minpass;
+      main_thread(pitr)->pass -= minpass;
     }
     ptable.mlfq.pass -= minpass;
   }
@@ -728,9 +880,14 @@ stridelogic(struct proc *p){
   if(p == 0 || p->type == MLFQ){
     ptable.mlfq.pass += STRD(ptable.mlfq.tickets);
   } else if(p->type == STRIDE){
-    if(p->state == RUNNABLE || p->state == SLEEPING){
-      p->pass += STRD(p->tickets);
-      pushheap(p);
+    thmain = main_thread(p);
+    thmain->pass += STRD(thmain->tickets);
+    if((nxt = ready_thread(p)) != 0){
+      pushheap(nxt);
+    } else if((nxt = sleeping_thread(p)) != 0){
+      pushheap(nxt);
+    } else {
+      cprintf("zombie!\n");
     }
   }
 }
@@ -772,14 +929,19 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
-      if(p->type == MLFQ){
+      if(p->type == MLFQ)
         mlfqlogic(c->proc);
-      }
-      c->proc = 0;
+      else
+        list_del(&p->run);
     }
 
     // Log stride
-    stridelogic(p);
+    if(p == 0 || p->state == SLEEPING)
+      stridelogic(p);
+    else
+      stridelogic(c->proc);
+
+    c->proc = 0;
 
     release(&ptable.lock);
   }
@@ -836,8 +998,6 @@ yield(void)
 
   acquire(&ptable.lock);  //DOC: yieldlock
   p = myproc();
-  if(p->type == STRIDE)
-    list_del(&p->run);
   p->state = RUNNABLE;
   sched();
   release(&ptable.lock);
@@ -889,18 +1049,15 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
-  if(p->type == MLFQ){
+  if(p->type == MLFQ)
     dequeue_thread(p);
-  } else {
-    list_del(&p->run);
-  }
   p->state = SLEEPING;
   list_add(&p->sleep, &ptable.sleep);
 
   sched();
 
   // Tidy up.
-  p->chan = 0;
+  myproc()->chan = 0;
 
   // Reacquire original lock.
   if(lk != &ptable.lock){  //DOC: sleeplock2
@@ -953,7 +1110,7 @@ kill(int pid)
   acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
-      p->killed = 1;
+      threads_apply0(p, __routine_kill);
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING){
         list_del(&p->sleep);
@@ -982,7 +1139,7 @@ procdump(void)
   [SLEEPING]  "sleep ",
   [RUNNABLE]  "runble",
   [RUNNING]   "run   ",
-  [ZOMBIE]    "zombie"
+  [ZOMBIE]    "zombie",
   };
   int i;
   struct proc *p;
@@ -993,7 +1150,7 @@ procdump(void)
     if(p->state == UNUSED)
       continue;
     if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
-      state = states[p->state];
+      state = p->killed ? "killed" : states[p->state];
     else
       state = "???";
     cprintf("%d %d %d %s %s", p->pid, p->privlevel, p->tid, state, p->name);

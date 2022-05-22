@@ -26,9 +26,9 @@ threads_apply0(struct proc* p,
   itr = start;
   do {
     th = list_entry(itr, struct proc, thgroup);
+    itr = itr->next;
     if(routine(th) != 0)
       return th;
-    itr = itr->next;
   } while(itr != start);
   return 0;
 }
@@ -45,9 +45,9 @@ threads_apply1(struct proc* p,
   itr = start;
   do {
     th = list_entry(itr, struct proc, thgroup);
+    itr = itr->next;
     if(routine(th, arg) != 0)
       return th;
-    itr = itr->next;
   } while(itr != start);
   return 0;
 }
@@ -84,6 +84,18 @@ struct proc*
 ready_thread(struct proc *th)
 {
   return threads_apply0(th, __routine_is_ready);
+}
+
+struct proc*
+__routine_is_sleeping(struct proc* th)
+{
+  return th->state == SLEEPING ? th : 0;
+}
+
+struct proc*
+sleeping_thread(struct proc *th)
+{
+  return threads_apply0(th, __routine_is_sleeping);
 }
 
 struct proc*
@@ -162,7 +174,6 @@ thread_create(thread_t *thread,
 
   safestrcpy(nth->name, thmain->name, sizeof(thmain->name));
 
-
   acquire(&ptable.lock);
 
   nth->state = RUNNABLE;
@@ -222,17 +233,17 @@ freethread(struct proc *th)
 int
 thread_join(thread_t thread, void **retval)
 {
-  struct proc *curth = myproc();
-  struct proc *th;
+  struct proc *th, *curth;
 
   acquire(&ptable.lock);
   for(;;){
+    curth = myproc();
     if((th = __get_thread(thread)) == 0){
       cprintf("%d\n", th->tid);
       release(&ptable.lock);
       return -1;
     }
-    if(th->state == ZOMBIE){
+    if(th->state == ZOMBIE && th->thmain == curth){
       *retval = th->retval;
       list_del(&th->thgroup);
       list_del(&th->sibling);

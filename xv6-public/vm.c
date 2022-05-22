@@ -7,6 +7,7 @@
 #include "list.h"
 #include "proc.h"
 #include "elf.h"
+#include "thread.h"
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -334,8 +335,35 @@ clearpteu(pde_t *pgdir, char *uva)
 
 // Given a parent process's page table, create a copy
 // of it for a child.
+struct proc*
+__routine_copy_ustack(struct proc *th, void *d)
+{
+  pte_t *pte;
+  uint ustack, pa, i, flags;
+  char *mem;
+  pte_t *pgdir;
+
+  pgdir = (pte_t*)d;
+  ustack = th->ustack;
+  for(i = PGROUNDDOWN(ustack); i < ustack + USTACKSIZE; i += PGSIZE){
+    if((pte = walkpgdir(th->pgdir, (void*)i, 0)) == 0)
+      panic("__routine_copy_ustack: pte should exist");
+    if(!(*pte & PTE_P))
+      panic("__routine_copy_ustack: page not present");
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      return th;
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+    if(mappages(pgdir, (void*)i, PGSIZE, V2P(mem), flags) < 0){
+      kfree(mem);
+      return th;
+    }
+  }
+  return 0;
+}
 pde_t*
-copyuvm(pde_t *pgdir, uint sz, uint ustack)
+copyuvm(struct proc *p)
 {
   pde_t *d;
   pte_t *pte;
@@ -344,8 +372,9 @@ copyuvm(pde_t *pgdir, uint sz, uint ustack)
 
   if((d = setupkvm()) == 0)
     return 0;
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, (void*)i, 0)) == 0)
+
+  for(i = 0; i < p->sz; i += PGSIZE){
+    if((pte = walkpgdir(p->pgdir, (void*)i, 0)) == 0)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
@@ -359,21 +388,10 @@ copyuvm(pde_t *pgdir, uint sz, uint ustack)
       goto bad;
     }
   }
-  for(i = PGROUNDDOWN(ustack); i < ustack + USTACKSIZE; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, (void*)i, 0)) == 0)
-      panic("copyuvm: pte should exist (ustack)");
-    if(!(*pte & PTE_P))
-      panic("copyuvm: page not present (ustack)");
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto bad;
-    memmove(mem, (char*)P2V(pa), PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
-      kfree(mem);
-      goto bad;
-    }
-  }
+
+  if(threads_apply1(p, __routine_copy_ustack, (void*)d) != 0)
+    goto bad;
+
   return d;
 
 bad:

@@ -27,7 +27,7 @@ argfd(int n, int *pfd, struct file **pf)
 
   if(argint(n, &fd) < 0)
     return -1;
-  if(fd < 0 || fd >= NOFILE || (f=myproc()->ofile[fd]) == 0)
+  if(fd < 0 || fd >= NOFILE || (f=main_thread(myproc())->ofile[fd]) == 0)
     return -1;
   if(pfd)
     *pfd = fd;
@@ -42,7 +42,7 @@ static int
 fdalloc(struct file *f)
 {
   int fd;
-  struct proc *curproc = myproc();
+  struct proc *curproc = main_thread(myproc());
 
   for(fd = 0; fd < NOFILE; fd++){
     if(curproc->ofile[fd] == 0){
@@ -99,7 +99,7 @@ sys_close(void)
 
   if(argfd(0, &fd, &f) < 0)
     return -1;
-  myproc()->ofile[fd] = 0;
+  main_thread(myproc())->ofile[fd] = 0;
   fileclose(f);
   return 0;
 }
@@ -374,7 +374,7 @@ sys_chdir(void)
 {
   char *path;
   struct inode *ip;
-  struct proc *curproc = myproc();
+  struct proc *curproc = main_thread(myproc());
   
   begin_op();
   if(argstr(0, &path) < 0 || (ip = namei(path)) == 0){
@@ -434,7 +434,7 @@ sys_pipe(void)
   fd0 = -1;
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
     if(fd0 >= 0)
-      myproc()->ofile[fd0] = 0;
+      main_thread(myproc())->ofile[fd0] = 0;
     fileclose(rf);
     fileclose(wf);
     return -1;
