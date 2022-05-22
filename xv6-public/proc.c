@@ -886,8 +886,6 @@ stridelogic(struct proc *p){
       pushheap(nxt);
     } else if((nxt = sleeping_thread(p)) != 0){
       pushheap(nxt);
-    } else {
-      cprintf("zombie!\n");
     }
   }
 }
