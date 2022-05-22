@@ -9,6 +9,7 @@
 #include "spinlock.h"
 #include "scheduler.h"
 #include "thread.h"
+#include "debug.h"
 
 extern struct ptable ptable;
 
@@ -239,6 +240,7 @@ thread_join(thread_t thread, void **retval)
   for(;;){
     curth = myproc();
     if((th = __get_thread(thread)) == 0 || curth->killed){
+      kprintf_trace("join fail! pid: %d, tid: %d\n", curth->pid, thread);
       release(&ptable.lock);
       return -1;
     }
