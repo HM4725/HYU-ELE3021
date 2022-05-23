@@ -1,1 +1,0 @@
-#define MAGICEXIT 0xE0E0E0E0
