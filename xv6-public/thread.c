@@ -12,6 +12,7 @@
 #include "debug.h"
 
 extern struct ptable ptable;
+extern int nproc;
 
 /* Type: callback0
  * ------------------------
@@ -143,11 +144,10 @@ __routine_usurp_proc(struct proc *th, void *main)
 
 ////////////
 
-static struct proc*
-__get_thread(thread_t thread)
+struct proc*
+get_thread(struct proc* p, thread_t thread)
 {
-  return threads_apply1(myproc(),
-                        __routine_get_thread,
+  return threads_apply1(p, __routine_get_thread,
                         (void*)thread);
 }
 
@@ -159,6 +159,7 @@ __free_thread(struct proc *th)
   deallocustack(th->pgdir, th->ustack);
   th->pid = 0;
   th->tid = 0;
+  th->type = 0;
   th->parent = 0;
   th->name[0] = 0;
   th->killed = 0;
@@ -168,6 +169,7 @@ __free_thread(struct proc *th)
   th->privlevel = 0;
   th->retval = 0;
   th->state = UNUSED;
+  nproc++;
   list_add(&th->free, &ptable.free);
 }
 
@@ -218,6 +220,21 @@ struct proc*
 ready_or_running_thread(struct proc *th)
 {
   return threads_apply0(th, __routine_is_ready_or_running);
+}
+
+int
+thread_size(struct proc *p)
+{
+  struct list_head *itr, *start;
+  int size = 0;
+
+  start = &p->thgroup;
+  itr = start;
+  do {
+    size++;
+    itr = itr->next;
+  } while(itr != start);
+  return size;
 }
 
 //////////
@@ -274,8 +291,10 @@ thread_create(thread_t *thread,
                                         struct proc,
                                         thgroup);
 
+  acquire(&ptable.lock);
   // Allocate process.
   if((nth = allocproc()) == 0){
+    release(&ptable.lock);
     return -1;
   }
 
@@ -293,7 +312,9 @@ thread_create(thread_t *thread,
     nth->kstack = 0;
     list_del(&nth->sibling);
     nth->state = UNUSED;
+    nproc++;
     list_add(&nth->free, &ptable.free);
+    release(&ptable.lock);
     return -1;
   }
   nth->ustack = sp - USTACKSIZE;
@@ -315,8 +336,6 @@ thread_create(thread_t *thread,
   nth->tf->eip = (uint)start_routine;
 
   safestrcpy(nth->name, thmain->name, sizeof(thmain->name));
-
-  acquire(&ptable.lock);
 
   nth->state = RUNNABLE;
   if(nth->type == MLFQ)
@@ -340,6 +359,8 @@ void
 thread_exit(void *retval)
 {
   struct proc *curth = myproc();
+  struct proc *p;
+  struct list_head *children, *itr;
   int fd;
 
   if(curth == curth->thmain){
@@ -355,7 +376,17 @@ thread_exit(void *retval)
   curth->retval = retval;
   wakeup1(curth->thmain);
 
+  // Pass abandoned thread to main thread.
   threads_apply1(curth, __routine_handle_orphan_thread, curth);
+
+  // Pass abandoned children to main thread.
+  children = &curth->children;
+  for(itr = children->next; itr != children; itr = itr->next){
+    p = list_entry(itr, struct proc, sibling);
+    p->parent = main_thread(curth);
+  }
+  list_bulk_move_tail(&curth->children, &main_thread(curth)->children);
+
 
   if(curth->type == MLFQ)
     dequeue_thread(curth);
@@ -383,7 +414,7 @@ thread_join(thread_t thread, void **retval)
   acquire(&ptable.lock);
   for(;;){
     curth = myproc();
-    if((th = __get_thread(thread)) == 0 || curth->killed){
+    if((th = get_thread(curth, thread)) == 0 || curth->killed){
       kprintf_trace("join fail! pid: %d, tid: %d\n", curth->pid, thread);
       release(&ptable.lock);
       return -1;

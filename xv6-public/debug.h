@@ -5,7 +5,7 @@
 #define DEBUG_LEVEL_WARN   4
 #define DEBUG_LEVEL_ERROR  5
 
-#define LOGGING            1
+#define LOGGING            0
 #define LOG_LEVEL          DEBUG_LEVEL_TRACE
 
 #define TO_STR2(arg) #arg

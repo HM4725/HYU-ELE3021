@@ -8,11 +8,13 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "scheduler.h"
+#include "debug.h"
 
 struct ptable ptable;
 
 static struct proc *initproc;
 
+int nproc = NPROC;
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
@@ -452,27 +454,30 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
+//  acquire(&ptable.lock);
 
   if(!list_empty(&ptable.free)){
     p = list_first_entry(&ptable.free, struct proc, free);
+    nproc--;
     list_del(&p->free);
     goto found;
   }
 
-  release(&ptable.lock);
+//  release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
 
-  release(&ptable.lock);
+//  release(&ptable.lock);
 
   list_head_init(&p->children);
+  p->logging = 0;
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
+    nproc++;
     list_add(&p->free, &ptable.free);
     return 0;
   }
@@ -567,22 +572,22 @@ growproc(int n)
   return 0;
 }
 
-// Create a new process copying p as the parent.
-// Sets up stack to return as if from system call.
-// Caller must set state of returned proc to RUNNABLE.
+void
+proc_begin_op(void)
+{
+  myproc()->logging = 1;
+}
+
+void
+proc_end_op(void)
+{
+  myproc()->logging = 0;
+}
+
 static struct proc*
 __search_thmain(struct proc *th1, struct proc *th2)
 {
-  struct list_head *end, *ritr1, *ritr2;
-
-  end = &th1->thmain->thgroup;
-  ritr1 = &th1->thgroup;
-  ritr2 = &th2->thgroup;
-  while(ritr1 != end){
-    ritr1 = ritr1->prev;
-    ritr2 = ritr2->prev;
-  }
-  return list_entry(ritr2, struct proc, thgroup);
+  return get_thread(th2, th1->thmain->tid);
 }
 
 static struct proc*
@@ -593,6 +598,11 @@ __routine_fork_thread(struct proc *th, void *main){
 
   if(th->tid == 0)
     return 0;
+  if(th->state != RUNNABLE &&
+     th->state != RUNNING  &&
+     th->state != SLEEPING){
+    return 0;
+  }
 
   if((nth = allocproc()) == 0){
     return th;
@@ -613,23 +623,29 @@ __routine_fork_thread(struct proc *th, void *main){
   nth->pid = thmain->pid;
   nth->ustack = th->ustack;
   nth->tid = th->tid;
+  nth->logging = th->logging;
+  if(nth->logging)
+    vbegin_op();
 
   list_add_tail(&nth->thgroup, &thmain->thgroup);
   if(th->thmain->tid == 0)
     nth->thmain = thmain;
-  else
+  else {
     nth->thmain = __search_thmain(th, nth);
+    if(nth->thmain == 0) nth->thmain = thmain;
+  }
 
   return 0;
 }
 
 static struct proc*
 __routine_rollback_thread(struct proc *th){
-  list_del(&th->thgroup);
   list_del(&th->sibling);
+  deallocustack(th->pgdir, th->ustack);
   kfree(th->kstack);
   th->kstack = 0;
   th->state = UNUSED;
+  nproc++;
   list_add(&th->free, &ptable.free);
   return 0;
 }
@@ -637,15 +653,24 @@ __routine_rollback_thread(struct proc *th){
 int
 fork(void)
 {
-  int i, pid, delta;
+  int i, pid, delta, sz;
   struct proc *np, *nxt;
   struct proc *curproc = myproc();
   struct proc *curmain = main_thread(curproc);
   struct proc *th, *nth;
   struct list_head *start, *itr1, *itr2;
 
+  acquire(&ptable.lock);
+  sz = thread_size(curproc);
+  if(sz > nproc){
+    release(&ptable.lock);
+    kprintf_error("require: %d, remain: %d\n", sz, nproc);
+    return -1;
+  }
+
   // Allocate process.
   if((np = allocproc()) == 0){
+    release(&ptable.lock);
     return -1;
   }
   np->pid = nextpid++;
@@ -656,13 +681,20 @@ fork(void)
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
+    nproc++;
     list_add(&np->free, &ptable.free);
+    release(&ptable.lock);
     return -1;
   }
+
   for(i = 0; i < NOFILE; i++)
     if(curmain->ofile[i])
       np->ofile[i] = filedup(curmain->ofile[i]);
   np->cwd = idup(curmain->cwd);
+
+  np->logging = curmain->logging;
+  if(np->logging)
+    vbegin_op();
 
   np->sz = curmain->sz;
   np->type = MLFQ;
@@ -689,9 +721,9 @@ fork(void)
     np->cwd = 0;
     threads_apply0(np, __routine_rollback_thread);
     freevm(np->pgdir);
+    release(&ptable.lock);
+    return -1;
   }
-
-  acquire(&ptable.lock);
 
   // kstack & state
   start = &curmain->thgroup;
@@ -707,6 +739,7 @@ fork(void)
       nth->tf->eax = 0;
       nth->state = RUNNABLE;
     } else {
+      // Modify local variables on kstack
       int ip, *pip;
       delta = (int)nth->kstack - (int)th->kstack;
       memmove(nth->kstack, th->kstack, KSTACKSIZE);
@@ -715,17 +748,14 @@ fork(void)
         pip = (int*)ip;
         if(*pip > (int)th->kstack && *pip < (int)th->kstack + KSTACKSIZE){
           *pip += delta;
-          cprintf("%p\n", *pip);
         }
       }
-      /*
       delta = (int)th->context - (int)th->kstack;
       nth->context = (struct context*)(delta + (int)nth->kstack);
       delta = (int)th->context->ebp - (int)th->kstack;
       nth->context->ebp = delta + (uint)nth->kstack;
       delta = (int)th->tf - (int)th->kstack;
       nth->tf = (struct trapframe*)(delta + (int)nth->kstack);
-      *((uint*)nth->tf - 1) = (uint)nth->tf;*/
       nth->state = th->state;
       if(nth->state == SLEEPING){
         nth->chan = th->chan == th ? nth : th->chan;
@@ -767,6 +797,8 @@ exit(void)
     while(!list_empty(&curproc->thgroup)){
       th = list_first_entry(&curproc->thgroup,
                             struct proc, thgroup);
+      kprintf_warn("join orphan thread %d\n", th->tid);
+      wakeup(th);
       thread_join(th->tid, (void**)&null);
     }
   } else {
@@ -787,7 +819,6 @@ exit(void)
   curproc->cwd = 0;
 
   acquire(&ptable.lock);
-
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
 
@@ -822,12 +853,14 @@ freeproc(struct proc *p)
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
+  p->type = 0;
   p->killed = 0;
   p->tickets = 0;
   p->pass = 0;
   p->ticks = 0;
   p->privlevel = 0;
   p->state = UNUSED;
+  nproc++;
   list_add(&p->free, &ptable.free);
 }
 // Wait for a child process to exit and return its pid.
@@ -937,10 +970,6 @@ mlfqlogic(struct proc *p){
   } else {
     pin_next_thread(p, 1);
   }
-  // Priority boost
-  if(ptable.mlfq.ticks >= BOOSTINTERVAL){
-    priority_boost();
-  }
 }
 
 void
@@ -1022,6 +1051,11 @@ scheduler(void)
         mlfqlogic(c->proc);
       else
         list_del(&p->run);
+    }
+
+    // Priority boost
+    if(ptable.mlfq.ticks >= BOOSTINTERVAL){
+      priority_boost();
     }
 
     // Log stride
@@ -1235,6 +1269,7 @@ procdump(void)
   char *state;
   uint pc[10];
 
+  cprintf("remain: %d\n", nproc);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;

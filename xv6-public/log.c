@@ -123,6 +123,13 @@ recover_from_log(void)
 
 // called at the start of each FS system call.
 void
+vbegin_op(void)
+{
+  acquire(&log.lock);
+  log.outstanding += 1;
+  release(&log.lock);
+}
+void
 begin_op(void)
 {
   acquire(&log.lock);
@@ -133,6 +140,7 @@ begin_op(void)
       // this op might exhaust log space; wait for commit.
       sleep(&log, &log.lock);
     } else {
+      proc_begin_op();
       log.outstanding += 1;
       release(&log.lock);
       break;
@@ -149,6 +157,7 @@ end_op(void)
 
   acquire(&log.lock);
   log.outstanding -= 1;
+  proc_end_op();
   if(log.committing)
     panic("log.committing");
   if(log.outstanding == 0){

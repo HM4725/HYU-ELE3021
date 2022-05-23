@@ -84,6 +84,7 @@ void            microdelay(int);
 // log.c
 void            initlog(int dev);
 void            log_write(struct buf*);
+void            vbegin_op();
 void            begin_op();
 void            end_op();
 
@@ -124,6 +125,9 @@ void            yield(void);
 int             set_cpu_share(int);
 void            enqueue_thread(struct proc*);
 void            dequeue_thread(struct proc*);
+void            proc_begin_op(void);
+void            proc_end_op(void);
+
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -169,6 +173,8 @@ struct proc*    main_thread(struct proc*);
 struct proc*    ready_thread(struct proc*);
 struct proc*    sleeping_thread(struct proc*);
 struct proc*    ready_or_running_thread(struct proc*);
+struct proc*    get_thread(struct proc*, thread_t);
+int             thread_size(struct proc*);
 void            terminate_proc(struct proc*);
 int             monopolize_proc(struct proc*);
 int             thread_create(thread_t*, void*(*)(void*), void*);
