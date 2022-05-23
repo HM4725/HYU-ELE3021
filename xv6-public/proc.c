@@ -322,8 +322,8 @@ enqueue_proc(struct proc *p)
   struct list_head *q;
   int level;
 
-  if(p->state != RUNNABLE)
-    panic("enqueue unready process");
+  if(p->state != RUNNABLE && p->state != RUNNING)
+    panic("enqueue proc: RUNNING, RUNNABLE");
 
   level = main_thread(p)->privlevel;
   q = &ptable.mlfq.queue[level];
@@ -914,6 +914,13 @@ mlfqselect(){
         p = list_first_entry(q, struct proc, mlfq);
       } else {
         p = list_entry(*ppin, struct proc, mlfq);
+      }
+      if(p->state == RUNNING){
+        pin_next_thread(p, 0);
+        if(*ppin == q)
+          pin_next_proc(p, 0);
+        if(*ppin == q)
+          continue;
       }
       if(main_thread(p)->privlevel != l)
         panic("mlfqselect");
