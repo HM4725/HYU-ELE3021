@@ -345,7 +345,7 @@ __routine_copy_ustack(struct proc *th, void *d)
 
   pgdir = (pte_t*)d;
   ustack = th->ustack;
-  for(i = PGROUNDDOWN(ustack); i < ustack + USTACKSIZE; i += PGSIZE){
+  for(i = PGROUNDDOWN(ustack) - PGSIZE; i < ustack + USTACKSIZE; i += PGSIZE){
     if((pte = walkpgdir(th->pgdir, (void*)i, 0)) == 0)
       panic("__routine_copy_ustack: pte should exist");
     if(!(*pte & PTE_P))
