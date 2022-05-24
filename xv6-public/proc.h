@@ -53,7 +53,6 @@ struct proc {
   int killed;                  // If non-zero, have been killed
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
-  int logging;
   char name[16];               // Process name (debugging)
   enum schedtype type;
   // Stride fields
@@ -72,6 +71,8 @@ struct proc {
   struct proc *thmain;
   struct list_head thgroup;
   void *retval;
+  // Used for thread fork
+  int logging;
 };
 
 // Process memory is laid out contiguously, low addresses first:
