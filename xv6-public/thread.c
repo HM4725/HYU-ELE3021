@@ -285,14 +285,14 @@ thread_create(thread_t *thread,
               void *arg)
 {
   uint sp;
-  struct proc *nth;
-  struct proc *curth = myproc();
-  struct proc *thmain = main_thread(curth);
-  struct proc *thlast = list_last_entry(&thmain->thgroup,
-                                        struct proc,
-                                        thgroup);
+  struct proc *nth, *curth, *thmain, *thlast;
 
   acquire(&ptable.lock);
+
+  curth = myproc();
+  thmain = main_thread(curth);
+  thlast = list_last_entry(&thmain->thgroup, struct proc, thgroup);
+
   // Allocate process.
   if((nth = allocproc()) == 0){
     release(&ptable.lock);
