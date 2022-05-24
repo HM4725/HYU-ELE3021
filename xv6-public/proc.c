@@ -454,8 +454,6 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-//  acquire(&ptable.lock);
-
   if(!list_empty(&ptable.free)){
     p = list_first_entry(&ptable.free, struct proc, free);
     nproc--;
@@ -463,13 +461,10 @@ allocproc(void)
     goto found;
   }
 
-//  release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
-
-//  release(&ptable.lock);
 
   list_head_init(&p->children);
   p->logging = 0;
@@ -641,7 +636,6 @@ __routine_fork_thread(struct proc *th, void *main){
 static struct proc*
 __routine_rollback_thread(struct proc *th){
   list_del(&th->sibling);
-  deallocustack(th->pgdir, th->ustack);
   kfree(th->kstack);
   th->kstack = 0;
   th->state = UNUSED;
