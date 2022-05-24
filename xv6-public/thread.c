@@ -250,9 +250,10 @@ monopolize_proc(struct proc *p)
   int null = 0;
 
   acquire(&ptable.lock);
-  wakeup1(p->thmain);
-  if(p != p->thmain)
+  if(p != p->thmain){
+    wakeup1(p->thmain);
     __usurp_proc(p);
+  }
   terminate_proc(p);
   p->killed = 0;
   release(&ptable.lock);
@@ -399,12 +400,11 @@ thread_exit(void *retval)
  * ------------------------
  * @group      Thread
  * @brief      Wait for a thread which exited.
- * @note       Evenif a thread didn't call this function,
- *             it's ok. OS calls this function implicitly.
  * @param[in]  thread: identifier of the thread which
                        current thread is waiting for.
  * @param[out] retval: the pointer for a return value
  *                     which exited thread sent.
+ * @return     On success 0 and on error -1
  */
 int
 thread_join(thread_t thread, void **retval)
