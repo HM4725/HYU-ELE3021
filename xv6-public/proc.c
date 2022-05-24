@@ -649,12 +649,16 @@ fork(void)
 {
   int i, pid, delta, sz;
   struct proc *np, *nxt;
-  struct proc *curproc = myproc();
-  struct proc *curmain = main_thread(curproc);
+  struct proc *curproc;
+  struct proc *curmain;
   struct proc *th, *nth;
   struct list_head *start, *itr1, *itr2;
 
   acquire(&ptable.lock);
+
+  curproc = myproc();
+  curmain = main_thread(curproc);
+
   sz = thread_size(curproc);
   if(sz > nproc){
     release(&ptable.lock);
