@@ -78,18 +78,6 @@ ready_proc(struct proc *p)
   return 0;
 }
 
-void
-uptick(void)
-{
-  struct proc* thmain;
-  acquire(&ptable.lock);
-  thmain = main_thread(myproc());
-  thmain->ticks++;
-  if(thmain->type == MLFQ)
-    ptable.mlfq.ticks++;
-  release(&ptable.lock);
-}
-
 /* Function: set_cpu_share
  * ------------------------
  * @group      Stride
@@ -1111,10 +1099,15 @@ sched(void)
 void
 yield(void)
 {
+  struct proc *thmain;
   struct proc *p;
 
   acquire(&ptable.lock);  //DOC: yieldlock
   p = myproc();
+  thmain = main_thread(p);
+  thmain->ticks++;
+  if(thmain->type == MLFQ)
+    ptable.mlfq.ticks++;
   p->state = RUNNABLE;
   sched();
   release(&ptable.lock);

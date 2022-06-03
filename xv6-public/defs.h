@@ -125,7 +125,6 @@ int             wait(void);
 void            wakeup1(void*);
 void            wakeup(void*);
 void            yield(void);
-void            uptick(void);
 int             set_cpu_share(int);
 void            enqueue_thread(struct proc*);
 void            dequeue_thread(struct proc*);
