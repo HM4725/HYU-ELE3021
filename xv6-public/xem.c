@@ -3,6 +3,7 @@
 #include "atomic.h"
 
 #define SLEEPTIME 30
+#define UNUSED (-1)
 
 // Helpers
 static void
@@ -11,7 +12,7 @@ queue_init(queue_t* q)
   q->head = 0;
   q->rear = 0;
   for(int i = 0; i < XEMQSZ; i++){
-    q->queue[i] = -1;
+    q->queue[i] = UNUSED;
   }
 }
 
@@ -46,7 +47,7 @@ queue_head(queue_t* q)
 static void
 queue_remove(queue_t* q)
 {
-  q->queue[q->head] = -1;
+  q->queue[q->head] = UNUSED;
   q->head = (q->head + 1) % XEMQSZ;
 }
 
@@ -54,7 +55,7 @@ int
 xem_init(xem_t *sema)
 {
   sema->guard = 0;
-  sema->count = 10;
+  sema->count = 1;
   queue_init(&sema->q);
   return 0;
 }
