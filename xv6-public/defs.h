@@ -53,6 +53,10 @@ int             readi(struct inode*, char*, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, char*, uint, uint);
 
+// futex.c
+int             futex_wait(thread_t* addr, thread_t tid);
+int             futex_wake(thread_t* addr);
+
 // ide.c
 void            ideinit(void);
 void            ideintr(void);

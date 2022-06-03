@@ -148,3 +148,27 @@ sys_thread_join(void)
     return -1;
   return thread_join((thread_t)thread, (void **)retval);
 }
+
+int
+sys_gettid(void)
+{
+  return (int)myproc()->tid;
+}
+
+int
+sys_futex_wait(void)
+{
+  int addr, val;
+  if(argint(0, &addr) < 0 || argint(1, &val) < 0)
+    return -1;
+  return futex_wait((thread_t*)addr, (thread_t)val);
+}
+
+int
+sys_futex_wake(void)
+{
+  int addr;
+  if(argint(0, &addr) < 0)
+    return -1;
+  return futex_wake((thread_t*)addr);
+}

@@ -29,6 +29,9 @@ int set_cpu_share(int);
 int thread_create(thread_t*, void*(*)(void*), void*);
 void thread_exit(void *);
 int thread_join(thread_t, void **);
+thread_t gettid(void);
+int futex_wait(thread_t*, thread_t);
+int futex_wake(thread_t*);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -43,3 +46,31 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+
+// xem.c
+#define XEMQSZ 64
+
+typedef struct {
+  int head;
+  int rear;
+  thread_t queue[XEMQSZ];
+} queue_t;
+typedef struct {
+  int guard;
+  int count;
+  queue_t q;
+} xem_t;
+typedef struct {
+  xem_t lock;
+  xem_t writelock;
+  int readers;
+} rwlock_t;
+
+int xem_init(xem_t*);
+int xem_wait(xem_t*);
+int xem_unlock(xem_t*);
+int rwlock_init(rwlock_t*);
+int rwlock_acquire_readlock(rwlock_t*);
+int rwlock_acquire_writelock(rwlock_t*);
+int rwlock_release_readlock(rwlock_t*);
+int rwlock_release_writelock(rwlock_t*);
