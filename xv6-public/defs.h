@@ -84,7 +84,6 @@ void            microdelay(int);
 // log.c
 void            initlog(int dev);
 void            log_write(struct buf*);
-void            vbegin_op();
 void            begin_op();
 void            end_op();
 
@@ -122,12 +121,10 @@ int             wait(void);
 void            wakeup1(void*);
 void            wakeup(void*);
 void            yield(void);
+void            uptick(void);
 int             set_cpu_share(int);
 void            enqueue_thread(struct proc*);
 void            dequeue_thread(struct proc*);
-void            proc_begin_op(void);
-void            proc_end_op(void);
-
 
 // swtch.S
 void            swtch(struct context**, struct context*);

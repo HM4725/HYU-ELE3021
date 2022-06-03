@@ -78,6 +78,18 @@ ready_proc(struct proc *p)
   return 0;
 }
 
+void
+uptick(void)
+{
+  struct proc* thmain;
+  acquire(&ptable.lock);
+  thmain = main_thread(myproc());
+  thmain->ticks++;
+  if(thmain->type == MLFQ)
+    ptable.mlfq.ticks++;
+  release(&ptable.lock);
+}
+
 /* Function: set_cpu_share
  * ------------------------
  * @group      Stride
@@ -467,7 +479,6 @@ found:
   p->state = EMBRYO;
 
   list_head_init(&p->children);
-  p->logging = 0;
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -567,18 +578,6 @@ growproc(int n)
   return 0;
 }
 
-void
-proc_begin_op(void)
-{
-  myproc()->logging = 1;
-}
-
-void
-proc_end_op(void)
-{
-  myproc()->logging = 0;
-}
-
 static struct proc*
 __search_thmain(struct proc *th1, struct proc *th2)
 {
@@ -618,9 +617,6 @@ __routine_fork_thread(struct proc *th, void *main){
   nth->pid = thmain->pid;
   nth->ustack = th->ustack;
   nth->tid = th->tid;
-  nth->logging = th->logging;
-  if(nth->logging)
-    vbegin_op();
 
   list_add_tail(&nth->thgroup, &thmain->thgroup);
   if(th->thmain->tid == 0)
@@ -689,10 +685,6 @@ fork(void)
     if(curmain->ofile[i])
       np->ofile[i] = filedup(curmain->ofile[i]);
   np->cwd = idup(curmain->cwd);
-
-  np->logging = curmain->logging;
-  if(np->logging)
-    vbegin_op();
 
   np->sz = curmain->sz;
   np->type = MLFQ;
@@ -1100,9 +1092,6 @@ sched(void)
     panic("sched interruptible");
   intena = mycpu()->intena;
 
-  thmain->ticks++;
-  if(thmain->type == MLFQ)
-    ptable.mlfq.ticks++;
   if(nxt == 0 || thmain->ticks % DTQ == 0){
     swtch(&p->context, mycpu()->scheduler);
   } else {

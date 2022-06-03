@@ -71,8 +71,6 @@ struct proc {
   struct proc *thmain;
   struct list_head thgroup;
   void *retval;
-  // Used for thread fork
-  int logging;
 };
 
 // Process memory is laid out contiguously, low addresses first:

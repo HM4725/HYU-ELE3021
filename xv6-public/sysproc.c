@@ -81,6 +81,7 @@ sys_sleep(void)
 int
 sys_yield(void)
 {
+  uptick();
   yield();
   return 0;
 }
