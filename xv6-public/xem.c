@@ -71,8 +71,8 @@ xem_wait(xem_t *sema)
       sleep(1);
     }
   }
-  if(sema->count > 0) {
-    sema->count--;
+  sema->count--;
+  if(sema->count >= 0) {
     sema->guard = 0;
   } else {
     val = gettid();
