@@ -54,6 +54,8 @@ queue_remove(queue_t* q)
 int
 xem_init(xem_t *sema)
 {
+  if(sema == 0)
+    return -1;
   sema->guard = 0;
   sema->count = 1;
   queue_init(&sema->q);
@@ -105,25 +107,54 @@ xem_unlock(xem_t *sema)
 int
 rwlock_init(rwlock_t *rwlock)
 {
-  return 1;
+  if(rwlock == 0)
+    return -1;
+  if(xem_init(&rwlock->lock) < 0)
+    return -1;
+  if(xem_init(&rwlock->writelock) < 0)
+    return -1;
+  rwlock->readers = 0;
+  return 0;
 }
 int
 rwlock_acquire_readlock(rwlock_t *rwlock)
 {
-  return 1;
+  if(rwlock == 0)
+    return -1;
+  if(xem_wait(&rwlock->lock) < 0)
+    return -1;
+  rwlock->readers++;
+  if(rwlock->readers == 1){
+    if(xem_wait(&rwlock->writelock) < 0)
+      return -1;
+  }
+  return xem_unlock(&rwlock->lock);
 }
 int
 rwlock_acquire_writelock(rwlock_t *rwlock)
 {
-  return 1;
+  if(rwlock == 0)
+    return -1;
+  return xem_wait(&rwlock->writelock);
 }
 int
 rwlock_release_readlock(rwlock_t *rwlock)
 {
-  return 1;
+  if(rwlock == 0)
+    return -1;
+  if(xem_wait(&rwlock->lock) < 0)
+    return -1;
+  rwlock->readers--;
+  if(rwlock->readers == 0){
+    if(xem_unlock(&rwlock->writelock) < 0)
+      return -1;
+  }
+  return xem_unlock(&rwlock->lock);
 }
 int
 rwlock_release_writelock(rwlock_t *rwlock)
 {
-  return 1;
+  if(rwlock == 0)
+    return -1;
+  return xem_unlock(&rwlock->writelock);
 }
