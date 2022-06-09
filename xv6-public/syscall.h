@@ -29,3 +29,5 @@
 #define SYS_gettid        28
 #define SYS_futex_wait    29
 #define SYS_futex_wake    30
+#define SYS_pread  31
+#define SYS_pwrite 32

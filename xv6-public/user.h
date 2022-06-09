@@ -32,6 +32,8 @@ int thread_join(thread_t, void **);
 thread_t gettid(void);
 int futex_wait(thread_t*, thread_t);
 int futex_wake(thread_t*);
+int pread(int, void*, int, int);
+int pwrite(int, void*, int, int);
 
 // ulib.c
 int stat(const char*, struct stat*);

@@ -94,7 +94,7 @@ filestat(struct file *f, struct stat *st)
 
 // Read from file f.
 int
-fileread(struct file *f, char *addr, int n)
+fileread(struct file *f, char *addr, int n, int off)
 {
   int r;
 
@@ -104,8 +104,12 @@ fileread(struct file *f, char *addr, int n)
     return piperead(f->pipe, addr, n);
   if(f->type == FD_INODE){
     ilock(f->ip);
+    if(off < 0){
     if((r = readi(f->ip, addr, f->off, n)) > 0)
       f->off += r;
+    } else {
+      r = readi(f->ip, addr, (uint)off, n);
+    }
     iunlock(f->ip);
     return r;
   }
@@ -115,7 +119,7 @@ fileread(struct file *f, char *addr, int n)
 //PAGEBREAK!
 // Write to file f.
 int
-filewrite(struct file *f, char *addr, int n)
+filewrite(struct file *f, char *addr, int n, int off)
 {
   int r;
 
@@ -139,8 +143,12 @@ filewrite(struct file *f, char *addr, int n)
 
       begin_op();
       ilock(f->ip);
-      if ((r = writei(f->ip, addr + i, f->off, n1)) > 0)
-        f->off += r;
+      if(off < 0){
+        if ((r = writei(f->ip, addr + i, f->off, n1)) > 0)
+          f->off += r;
+      } else {
+        r = writei(f->ip, addr + i, (uint)off, n1);
+      }
       iunlock(f->ip);
       end_op();
 

@@ -133,6 +133,8 @@ extern int sys_thread_join(void);
 extern int sys_gettid(void);
 extern int sys_futex_wait(void);
 extern int sys_futex_wake(void);
+extern int sys_pread(void);
+extern int sys_pwrite(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -165,6 +167,8 @@ static int (*syscalls[])(void) = {
 [SYS_gettid]        sys_gettid,
 [SYS_futex_wait]    sys_futex_wait,
 [SYS_futex_wake]    sys_futex_wake,
+[SYS_pread]   sys_pread,
+[SYS_pwrite]  sys_pwrite,
 };
 
 void
