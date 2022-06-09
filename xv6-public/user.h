@@ -63,9 +63,10 @@ typedef struct {
   queue_t q;
 } xem_t;
 typedef struct {
-  xem_t lock;
-  xem_t writelock;
-  int readers;
+  xem_t in;
+  xem_t mx;
+  xem_t wrt;
+  int ctr;
 } rwlock_t;
 
 int xem_init(xem_t*);
