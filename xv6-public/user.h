@@ -76,3 +76,13 @@ int rwlock_acquire_readlock(rwlock_t*);
 int rwlock_acquire_writelock(rwlock_t*);
 int rwlock_release_readlock(rwlock_t*);
 int rwlock_release_writelock(rwlock_t*);
+
+// uthread.c
+typedef struct {
+  int fd;
+  rwlock_t lock;
+} thread_safe_guard;
+thread_safe_guard* thread_safe_guard_init(int);
+int thread_safe_pread(thread_safe_guard*, void*, int, int);
+int thread_safe_pwrite(thread_safe_guard*, void*, int, int);
+void thread_safe_guard_destroy(thread_safe_guard*);
