@@ -186,6 +186,7 @@ UPROGS=\
     _utuser\
     _mlfqtest\
     _test_bigrw\
+    _test_prw\
     _test_rwlock\
     _test_thread2\
     _time\
@@ -260,7 +261,7 @@ EXTRA=\
     uthread.c\
 	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
 	printf.c umalloc.c utuser.c mlfqtest.c test_thread2.c time.c\
-    test_rwlock.c test_bigrw.c\
+    test_rwlock.c test_bigrw.c test_prw.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\
 
