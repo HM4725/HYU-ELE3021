@@ -136,6 +136,7 @@ filewrite(struct file *f, char *addr, int n, int off)
     // might be writing a device like the console.
     int max = ((MAXOPBLOCKS-1-1-2) / 2) * 512;
     int i = 0;
+    int o = off;
     while(i < n){
       int n1 = n - i;
       if(n1 > max)
@@ -147,7 +148,8 @@ filewrite(struct file *f, char *addr, int n, int off)
         if ((r = writei(f->ip, addr + i, f->off, n1)) > 0)
           f->off += r;
       } else {
-        r = writei(f->ip, addr + i, (uint)off, n1);
+        if((r = writei(f->ip, addr + i, (uint)o, n1)) > 0)
+          o += r;
       }
       iunlock(f->ip);
       end_op();
