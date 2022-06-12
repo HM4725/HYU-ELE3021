@@ -14,7 +14,8 @@ char stdout = 1;
 
 int randint(int seed)
 {
-  return (seed << 7) * seed + 13;
+  int rand = (seed << 7) * seed + 13;
+  return rand < 0 ? -rand : rand;
 }
 
 int main()
