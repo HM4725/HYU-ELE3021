@@ -183,7 +183,6 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
-    _utuser\
     _mlfqtest\
     _test_bigrw\
     _test_prw\
@@ -260,7 +259,7 @@ EXTRA=\
 	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c xem.c\
     uthread.c\
 	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
-	printf.c umalloc.c utuser.c mlfqtest.c test_thread2.c time.c\
+	printf.c umalloc.c mlfqtest.c test_thread2.c time.c\
     test_rwlock.c test_bigrw.c test_prw.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\
